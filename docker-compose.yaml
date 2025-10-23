@@ -1,0 +1,49 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    container_name: filemanager-postgres
+    environment:
+      POSTGRES_DB: filemanager
+      POSTGRES_USER: fileuser
+      POSTGRES_PASSWORD: filepassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fileuser -d filemanager"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - filemanager-network
+
+  minio:
+    image: minio/minio
+    container_name: filemanager-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - filemanager-network
+
+volumes:
+  postgres_data:
+  minio_data:
+
+networks:
+  filemanager-network:
+    driver: bridge

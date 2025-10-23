@@ -1,14 +1,62 @@
 package storage
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
-	"sort"
-	"sync"
+    "encoding/json"
+    "fmt"
+    "os"
+    "sort"
+    "sync"
 
-	"github.com/File-Sharing-BondBridg/File-Service/internal/models"
+    "github.com/File-Sharing-BondBridg/File-Service/internal/models"
 )
+
+// LocalStorage implements Storage interface for local JSON file storage
+type LocalStorage struct {
+    fileMetadataStore map[string]models.FileMetadata
+    metadataMutex     sync.RWMutex
+}
+
+func (l *LocalStorage) SaveFileMetadata(metadata models.FileMetadata) error {
+    l.metadataMutex.Lock()
+    l.fileMetadataStore[metadata.ID] = metadata
+    l.metadataMutex.Unlock()
+
+    return l.saveToFile()
+}
+
+func (l *LocalStorage) GetFileMetadata(fileID string) (models.FileMetadata, bool) {
+    l.metadataMutex.RLock()
+    defer l.metadataMutex.RUnlock()
+    metadata, exists := l.fileMetadataStore[fileID]
+    return metadata, exists
+}
+
+func (l *LocalStorage) GetAllFileMetadata() []models.FileMetadata {
+    l.metadataMutex.RLock()
+    defer l.metadataMutex.RUnlock()
+
+    files := make([]models.FileMetadata, 0, len(l.fileMetadataStore))
+    for _, metadata := range l.fileMetadataStore {
+        files = append(files, metadata)
+    }
+
+    sort.Slice(files, func(i, j int) bool {
+        return files[i].UploadedAt.After(files[j].UploadedAt)
+    })
+
+    return files
+}
+
+func (l *LocalStorage) DeleteFileMetadata(fileID string) bool {
+    l.metadataMutex.Lock()
+    defer l.metadataMutex.Unlock()
+
+    if _, exists := l.fileMetadataStore[fileID]; exists {
+        delete(l.fileMetadataStore, fileID)
+        return l.saveToFile() == nil
+    }
+    return false
+}
 
 const metadataFile = "file_metadata.json"
 

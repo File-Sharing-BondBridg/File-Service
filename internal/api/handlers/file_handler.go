@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/File-Sharing-BondBridg/File-Service/internal/models"
-	"github.com/File-Sharing-BondBridg/File-Service/internal/storage"
+	minio "github.com/File-Sharing-BondBridg/File-Service/internal/storage/minio_service"
+	postgres "github.com/File-Sharing-BondBridg/File-Service/internal/storage/postgres"
 	uploads "github.com/File-Sharing-BondBridg/File-Service/uploads/previews"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -20,72 +21,115 @@ func HealthCheck(c *gin.Context) {
 }
 
 func UploadFile(c *gin.Context) {
-	file, err := c.FormFile("file")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
-		return
-	}
+    file, err := c.FormFile("file")
+    if err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
+        return
+    }
 
-	// Generate unique file ID
-	fileID := uuid.New().String()
+    // Generate unique file ID
+    fileID := uuid.New().String()
 
-	// Get file extension and type
-	ext := strings.ToLower(filepath.Ext(file.Filename))
-	fileName := strings.TrimSuffix(file.Filename, ext)
+    // Get file extension and type
+    ext := strings.ToLower(filepath.Ext(file.Filename))
+    fileName := strings.TrimSuffix(file.Filename, ext)
 
-	// Determine file type
-	fileType := "other"
-	switch ext {
-	case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp":
-		fileType = "image"
-	case ".pdf", ".doc", ".docx", ".txt":
-		fileType = "document"
-	case ".mp4", ".avi", ".mov", ".mkv":
-		fileType = "video"
-	case ".mp3", ".wav", ".ogg":
-		fileType = "audio"
-	}
+    // Determine file type
+    fileType := "other"
+    switch ext {
+    case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp":
+        fileType = "image"
+    case ".pdf", ".doc", ".docx", ".txt":
+        fileType = "document"
+    case ".mp4", ".avi", ".mov", ".mkv":
+        fileType = "video"
+    case ".mp3", ".wav", ".ogg":
+        fileType = "audio"
+    }
 
-	// Create destination path with unique ID
-	dst := fmt.Sprintf("./uploads/%s%s", fileID, ext)
-	if err := c.SaveUploadedFile(file, dst); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
+    // Save file locally first (temporary)
+    tempLocalPath := fmt.Sprintf("./uploads/%s%s", fileID, ext)
+    if err := c.SaveUploadedFile(file, tempLocalPath); err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+        return
+    }
 
-	// Generate preview for supported file types
-	var previewPath string
-	switch ext {
-	case ".jpg", ".jpeg", ".png", ".gif":
-		previewPath, _ = uploads.GenerateImagePreview(dst, 200)
-	case ".pdf":
-		previewPath, _ = uploads.GeneratePDFPreview(dst, 200)
-	}
+    // Upload to MinIO
+    minioService := services.GetMinioService()
+    objectName := fileID + ext
+    contentType := services.GetContentType(ext)
+    
+    if err := minioService.UploadFile(tempLocalPath, objectName, contentType); err != nil {
+        // Clean up local file
+        os.Remove(tempLocalPath)
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload to storage: " + err.Error()})
+        return
+    }
 
-	// Create file metadata
-	fileMetadata := models.FileMetadata{
-		ID:           fileID,
-		Name:         fileName,
-		OriginalName: file.Filename,
-		Size:         file.Size,
-		Type:         fileType,
-		Extension:    ext,
-		UploadedAt:   time.Now(),
-		FilePath:     dst,
-		PreviewPath:  previewPath,
-		ShareURL:     "", // Will be set when shared
-	}
+    // Generate preview for supported file types
+    var previewPath string
+    switch ext {
+    case ".jpg", ".jpeg", ".png", ".gif":
+        previewPath, _ = uploads.GenerateImagePreview(tempLocalPath, 200)
+    case ".pdf":
+        previewPath, _ = uploads.GeneratePDFPreview(tempLocalPath, 200)
+    }
 
-	// Save metadata to database
-	if err := storage.SaveFileMetadata(fileMetadata); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file metadata"})
-		return
-	}
+    // Upload preview to MinIO if generated
+    var previewObjectName string
+    if previewPath != "" {
+        previewObjectName = "previews/" + fileID + ".jpg"
+        if err := minioService.UploadFile(previewPath, previewObjectName, "image/jpeg"); err != nil {
+            fmt.Printf("Warning: Failed to upload preview: %v\n", err)
+        }
+        // Clean up local preview
+        defer os.Remove(previewPath)
+    }
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "File uploaded successfully",
-		"file":    fileMetadata,
-	})
+    // Create file metadata
+    fileMetadata := models.FileMetadata{
+        ID:           fileID,
+        Name:         fileName,
+        OriginalName: file.Filename,
+        Size:         file.Size,
+        Type:         fileType,
+        Extension:    ext,
+        UploadedAt:   time.Now(),
+        FilePath:     objectName, // Now storing MinIO object name instead of local path
+        PreviewPath:  previewObjectName,
+        ShareURL:     "", // Will be set when shared
+    }
+
+    // Save metadata to PostgreSQL
+    if err := storage.SaveFileMetadata(fileMetadata); err != nil {
+        // Clean up files from MinIO
+        minioService.DeleteFile(objectName)
+        if previewObjectName != "" {
+            minioService.DeleteFile(previewObjectName)
+        }
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file metadata"})
+        return
+    }
+
+    // Publish message to RabbitMQ for async processing (if needed)
+    rabbitmqService := services.GetRabbitMQService()
+    if rabbitmqService != nil {
+        message := services.FileProcessingMessage{
+            FileID:    fileID,
+            FilePath:  objectName,
+            FileType:  fileType,
+            Operation: "upload",
+        }
+        rabbitmqService.PublishFileProcessingMessage(message)
+    }
+
+    // Clean up local file
+    defer os.Remove(tempLocalPath)
+
+    c.JSON(http.StatusOK, gin.H{
+        "message": "File uploaded successfully",
+        "file":    fileMetadata,
+    })
 }
 
 func GetFile(c *gin.Context) {
