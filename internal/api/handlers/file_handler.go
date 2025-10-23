@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/File-Sharing-BondBridg/File-Service/internal/models"
-	minio "github.com/File-Sharing-BondBridg/File-Service/internal/storage/minio_service"
-	postgres "github.com/File-Sharing-BondBridg/File-Service/internal/storage/postgres"
+	"github.com/File-Sharing-BondBridg/File-Service/internal/services"
+	"github.com/File-Sharing-BondBridg/File-Service/internal/storage"
 	uploads "github.com/File-Sharing-BondBridg/File-Service/uploads/previews"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -21,115 +21,129 @@ func HealthCheck(c *gin.Context) {
 }
 
 func UploadFile(c *gin.Context) {
-    file, err := c.FormFile("file")
-    if err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
-        return
-    }
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
+		return
+	}
 
-    // Generate unique file ID
-    fileID := uuid.New().String()
+	// Generate unique file ID
+	fileID := uuid.New().String()
 
-    // Get file extension and type
-    ext := strings.ToLower(filepath.Ext(file.Filename))
-    fileName := strings.TrimSuffix(file.Filename, ext)
+	// Get file extension and type
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	fileName := strings.TrimSuffix(file.Filename, ext)
 
-    // Determine file type
-    fileType := "other"
-    switch ext {
-    case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp":
-        fileType = "image"
-    case ".pdf", ".doc", ".docx", ".txt":
-        fileType = "document"
-    case ".mp4", ".avi", ".mov", ".mkv":
-        fileType = "video"
-    case ".mp3", ".wav", ".ogg":
-        fileType = "audio"
-    }
+	// Determine file type
+	fileType := "other"
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp":
+		fileType = "image"
+	case ".pdf", ".doc", ".docx", ".txt":
+		fileType = "document"
+	case ".mp4", ".avi", ".mov", ".mkv":
+		fileType = "video"
+	case ".mp3", ".wav", ".ogg":
+		fileType = "audio"
+	}
 
-    // Save file locally first (temporary)
-    tempLocalPath := fmt.Sprintf("./uploads/%s%s", fileID, ext)
-    if err := c.SaveUploadedFile(file, tempLocalPath); err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-        return
-    }
+	// Save file locally first (temporary)
+	tempLocalPath := fmt.Sprintf("./temp/uploads/%s%s", fileID, ext)
+	if err := os.MkdirAll("./temp/uploads", 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create upload directory"})
+		return
+	}
 
-    // Upload to MinIO
-    minioService := services.GetMinioService()
-    objectName := fileID + ext
-    contentType := services.GetContentType(ext)
-    
-    if err := minioService.UploadFile(tempLocalPath, objectName, contentType); err != nil {
-        // Clean up local file
-        os.Remove(tempLocalPath)
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload to storage: " + err.Error()})
-        return
-    }
+	if err := c.SaveUploadedFile(file, tempLocalPath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	// Always clean up the temporary local file
+	defer os.Remove(tempLocalPath)
 
-    // Generate preview for supported file types
-    var previewPath string
-    switch ext {
-    case ".jpg", ".jpeg", ".png", ".gif":
-        previewPath, _ = uploads.GenerateImagePreview(tempLocalPath, 200)
-    case ".pdf":
-        previewPath, _ = uploads.GeneratePDFPreview(tempLocalPath, 200)
-    }
+	// Get MinIO service
+	minioService := services.GetMinioService()
+	if minioService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Storage service not available"})
+		return
+	}
 
-    // Upload preview to MinIO if generated
-    var previewObjectName string
-    if previewPath != "" {
-        previewObjectName = "previews/" + fileID + ".jpg"
-        if err := minioService.UploadFile(previewPath, previewObjectName, "image/jpeg"); err != nil {
-            fmt.Printf("Warning: Failed to upload preview: %v\n", err)
-        }
-        // Clean up local preview
-        defer os.Remove(previewPath)
-    }
+	// Upload to MinIO
+	objectName := fileID + ext
+	contentType := services.GetContentType(ext)
 
-    // Create file metadata
-    fileMetadata := models.FileMetadata{
-        ID:           fileID,
-        Name:         fileName,
-        OriginalName: file.Filename,
-        Size:         file.Size,
-        Type:         fileType,
-        Extension:    ext,
-        UploadedAt:   time.Now(),
-        FilePath:     objectName, // Now storing MinIO object name instead of local path
-        PreviewPath:  previewObjectName,
-        ShareURL:     "", // Will be set when shared
-    }
+	if err := minioService.UploadFile(tempLocalPath, objectName, contentType); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload to storage: " + err.Error()})
+		return
+	}
 
-    // Save metadata to PostgreSQL
-    if err := storage.SaveFileMetadata(fileMetadata); err != nil {
-        // Clean up files from MinIO
-        minioService.DeleteFile(objectName)
-        if previewObjectName != "" {
-            minioService.DeleteFile(previewObjectName)
-        }
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file metadata"})
-        return
-    }
+	// Generate preview for supported file types and upload to MinIO
+	var previewObjectName string
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".gif":
+		previewPath, err := uploads.GenerateImagePreview(tempLocalPath, 200)
+		if err == nil && previewPath != "" {
+			previewObjectName = "previews/" + fileID + ".jpg"
+			if err := minioService.UploadFile(previewPath, previewObjectName, "image/jpeg"); err != nil {
+				fmt.Printf("Warning: Failed to upload preview: %v\n", err)
+			}
+			// Clean up local preview
+			defer os.Remove(previewPath)
+		}
+	case ".pdf":
+		previewPath, err := uploads.GeneratePDFPreview(tempLocalPath, 200)
+		if err == nil && previewPath != "" {
+			previewObjectName = "previews/" + fileID + ".jpg"
+			if err := minioService.UploadFile(previewPath, previewObjectName, "image/jpeg"); err != nil {
+				fmt.Printf("Warning: Failed to upload preview: %v\n", err)
+			}
+			// Clean up local preview
+			defer os.Remove(previewPath)
+		}
+	}
 
-    // Publish message to RabbitMQ for async processing (if needed)
-    rabbitmqService := services.GetRabbitMQService()
-    if rabbitmqService != nil {
-        message := services.FileProcessingMessage{
-            FileID:    fileID,
-            FilePath:  objectName,
-            FileType:  fileType,
-            Operation: "upload",
-        }
-        rabbitmqService.PublishFileProcessingMessage(message)
-    }
+	// Create file metadata
+	fileMetadata := models.FileMetadata{
+		ID:           fileID,
+		Name:         fileName,
+		OriginalName: file.Filename,
+		Size:         file.Size,
+		Type:         fileType,
+		Extension:    ext,
+		UploadedAt:   time.Now(),
+		FilePath:     objectName,        // MinIO object name
+		PreviewPath:  previewObjectName, // MinIO preview object name
+		ShareURL:     "",                // Will be set when shared
+	}
 
-    // Clean up local file
-    defer os.Remove(tempLocalPath)
+	// Save metadata to PostgreSQL
+	if err := storage.SaveFileMetadata(fileMetadata); err != nil {
+		// Clean up files from MinIO if metadata save fails
+		minioService.DeleteFile(objectName)
+		if previewObjectName != "" {
+			minioService.DeleteFile(previewObjectName)
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file metadata"})
+		return
+	}
 
-    c.JSON(http.StatusOK, gin.H{
-        "message": "File uploaded successfully",
-        "file":    fileMetadata,
-    })
+	// Publish message to RabbitMQ for async processing (if needed)
+	rabbitmqService := services.GetRabbitMQService()
+	if rabbitmqService != nil {
+		message := services.FileProcessingMessage{
+			FileID:    fileID,
+			FilePath:  objectName,
+			FileType:  fileType,
+			Operation: "upload",
+		}
+		rabbitmqService.PublishFileProcessingMessage(message)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "File uploaded successfully",
+		"file":    fileMetadata,
+		"storage": "minio",
+	})
 }
 
 func GetFile(c *gin.Context) {
@@ -142,12 +156,31 @@ func GetFile(c *gin.Context) {
 		return
 	}
 
-	// Serve the actual file
-	c.File(metadata.FilePath)
+	// Get MinIO service
+	minioService := services.GetMinioService()
+	if minioService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Storage service not available"})
+		return
+	}
+
+	// Download from MinIO to temporary location
+	tempPath := fmt.Sprintf("./temp/downloads/%s%s", metadata.ID, metadata.Extension)
+	if err := os.MkdirAll("./temp/downloads", 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create temp directory"})
+		return
+	}
+	defer os.Remove(tempPath) // Clean up after serving
+
+	if err := minioService.DownloadFile(metadata.FilePath, tempPath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to download file from storage"})
+		return
+	}
+
+	c.File(tempPath)
 }
 
 func ListFiles(c *gin.Context) {
-	// Get all files from metadata store
+	// Get all files from PostgreSQL
 	files := storage.GetAllFileMetadata()
 
 	c.JSON(http.StatusOK, gin.H{
@@ -171,12 +204,27 @@ func GetPreview(c *gin.Context) {
 		return
 	}
 
-	if _, err := os.Stat(metadata.PreviewPath); os.IsNotExist(err) {
+	// Get MinIO service
+	minioService := services.GetMinioService()
+	if minioService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Storage service not available"})
+		return
+	}
+
+	// Download preview from MinIO to temporary location
+	tempPath := fmt.Sprintf("./temp/previews/%s.jpg", id)
+	if err := os.MkdirAll("./temp/previews", 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create temp directory"})
+		return
+	}
+	defer os.Remove(tempPath) // Clean up after serving
+
+	if err := minioService.DownloadFile(metadata.PreviewPath, tempPath); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Preview file not found"})
 		return
 	}
 
-	c.File(metadata.PreviewPath)
+	c.File(tempPath)
 }
 
 func DeleteFile(c *gin.Context) {
@@ -195,26 +243,27 @@ func DeleteFile(c *gin.Context) {
 		return
 	}
 
-	// Delete the actual file
-	if err := os.Remove(metadata.FilePath); err != nil {
-		if !os.IsNotExist(err) {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete file: " + err.Error()})
-			return
-		}
-		// File doesn't exist, but we'll continue to delete metadata
+	// Get MinIO service
+	minioService := services.GetMinioService()
+	if minioService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Storage service not available"})
+		return
 	}
 
-	// Delete preview file if it exists
+	// Delete from MinIO
+	if err := minioService.DeleteFile(metadata.FilePath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete file from storage: " + err.Error()})
+		return
+	}
+
+	// Delete preview from MinIO if it exists
 	if metadata.PreviewPath != "" {
-		if err := os.Remove(metadata.PreviewPath); err != nil {
-			if !os.IsNotExist(err) {
-				// Log the error but don't fail the entire operation
-				fmt.Printf("Warning: Failed to delete preview file: %v\n", err)
-			}
+		if err := minioService.DeleteFile(metadata.PreviewPath); err != nil {
+			fmt.Printf("Warning: Failed to delete preview from storage: %v\n", err)
 		}
 	}
 
-	// Delete metadata from storage
+	// Delete metadata from PostgreSQL
 	if storage.DeleteFileMetadata(fileID) {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "File deleted successfully",
@@ -225,7 +274,6 @@ func DeleteFile(c *gin.Context) {
 	}
 }
 
-// DownloadFile Add this method for downloading files
 func DownloadFile(c *gin.Context) {
 	id := c.Param("id")
 
@@ -236,16 +284,35 @@ func DownloadFile(c *gin.Context) {
 		return
 	}
 
+	// Get MinIO service
+	minioService := services.GetMinioService()
+	if minioService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Storage service not available"})
+		return
+	}
+
+	// Download from MinIO to temporary location
+	tempPath := fmt.Sprintf("./temp/downloads/%s%s", metadata.ID, metadata.Extension)
+	if err := os.MkdirAll("./temp/downloads", 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create temp directory"})
+		return
+	}
+	defer os.Remove(tempPath) // Clean up after serving
+
+	if err := minioService.DownloadFile(metadata.FilePath, tempPath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to download file from storage"})
+		return
+	}
+
 	// Set appropriate headers for download
 	c.Header("Content-Description", "File Transfer")
 	c.Header("Content-Disposition", "attachment; filename="+metadata.OriginalName)
 	c.Header("Content-Type", "application/octet-stream")
 	c.Header("Content-Transfer-Encoding", "binary")
 
-	c.File(metadata.FilePath)
+	c.File(tempPath)
 }
 
-// GetFileInfo Add this method for getting file info
 func GetFileInfo(c *gin.Context) {
 	id := c.Param("id")
 

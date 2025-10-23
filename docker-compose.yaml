@@ -20,6 +20,19 @@ services:
     networks:
       - filemanager-network
 
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: filemanager-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@filemanager.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "8081:80"
+    networks:
+      - filemanager-network
+    depends_on:
+      - postgres
+
   minio:
     image: minio/minio
     container_name: filemanager-minio

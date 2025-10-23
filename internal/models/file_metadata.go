@@ -1,4 +1,4 @@
-package models
+﻿package models
 
 import (
 	"time"
@@ -15,4 +15,5 @@ type FileMetadata struct {
 	FilePath     string    `json:"file_path"`
 	PreviewPath  string    `json:"preview_path"`
 	ShareURL     string    `json:"share_url"`
+	BucketName   string    `json:"bucket_name"`
 }

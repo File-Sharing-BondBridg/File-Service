@@ -1,54 +1,66 @@
 package storage
 
 import (
-    "context"
-    "database/sql"
-    "fmt"
-    "log"
-    "time"
+	"context"
+	"database/sql"
+	"fmt"
+	"log"
+	"time"
 
-    "github.com/File-Sharing-BondBridg/File-Service/internal/models"
-    _ "github.com/lib/pq"
+	"github.com/File-Sharing-BondBridg/File-Service/internal/models"
+	_ "github.com/lib/pq"
 )
 
-// PostgresStorage implements Storage interface for PostgreSQL
+// PostgresStorage handles PostgreSQL operations
 type PostgresStorage struct {
-    db *sql.DB
+	db *sql.DB
+}
+
+var postgresInstance *PostgresStorage
+
+// InitializePostgres sets up PostgreSQL storage
+func InitializePostgres(connectionString string) error {
+	pgStorage := &PostgresStorage{}
+	if err := pgStorage.Connect(connectionString); err != nil {
+		return err
+	}
+	postgresInstance = pgStorage
+	return nil
 }
 
 // Connect establishes connection to PostgreSQL
 func (p *PostgresStorage) Connect(connectionString string) error {
-    db, err := sql.Open("postgres", connectionString)
-    if err != nil {
-        return fmt.Errorf("failed to connect to PostgreSQL: %v", err)
-    }
+	db, err := sql.Open("postgres", connectionString)
+	if err != nil {
+		return fmt.Errorf("failed to connect to PostgreSQL: %v", err)
+	}
 
-    // Test the connection
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
+	// Test the connection
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-    if err := db.PingContext(ctx); err != nil {
-        return fmt.Errorf("failed to ping PostgreSQL: %v", err)
-    }
+	if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("failed to ping PostgreSQL: %v", err)
+	}
 
-    // Set connection pool settings
-    db.SetMaxOpenConns(25)
-    db.SetMaxIdleConns(25)
-    db.SetConnMaxLifetime(5 * time.Minute)
+	// Set connection pool settings
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(25)
+	db.SetConnMaxLifetime(5 * time.Minute)
 
-    p.db = db
+	p.db = db
 
-    // Create tables
-    if err := p.createTables(); err != nil {
-        return fmt.Errorf("failed to create tables: %v", err)
-    }
+	// Create tables
+	if err := p.createTables(); err != nil {
+		return fmt.Errorf("failed to create tables: %v", err)
+	}
 
-    log.Println("✅ Connected to PostgreSQL successfully")
-    return nil
+	log.Println("✅ Connected to PostgreSQL successfully")
+	return nil
 }
 
 func (p *PostgresStorage) createTables() error {
-    query := `
+	query := `
     CREATE TABLE IF NOT EXISTS files (
         id UUID PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
@@ -70,13 +82,49 @@ func (p *PostgresStorage) createTables() error {
     CREATE INDEX IF NOT EXISTS idx_files_type ON files(type);
     `
 
-    _, err := p.db.Exec(query)
-    return err
+	_, err := p.db.Exec(query)
+	return err
 }
 
-// Implement Storage interface methods
-func (p *PostgresStorage) SaveFileMetadata(metadata models.FileMetadata) error {
-    query := `
+// Public functions - directly callable from handlers
+func SaveFileMetadata(metadata models.FileMetadata) error {
+	if postgresInstance == nil {
+		return fmt.Errorf("postgres storage not initialized")
+	}
+	return postgresInstance.saveFileMetadata(metadata)
+}
+
+func GetFileMetadata(fileID string) (models.FileMetadata, bool) {
+	if postgresInstance == nil {
+		return models.FileMetadata{}, false
+	}
+	return postgresInstance.getFileMetadata(fileID)
+}
+
+func GetAllFileMetadata() []models.FileMetadata {
+	if postgresInstance == nil {
+		return []models.FileMetadata{}
+	}
+	return postgresInstance.getAllFileMetadata()
+}
+
+func DeleteFileMetadata(fileID string) bool {
+	if postgresInstance == nil {
+		return false
+	}
+	return postgresInstance.deleteFileMetadata(fileID)
+}
+
+func GetStats() map[string]interface{} {
+	if postgresInstance == nil {
+		return map[string]interface{}{}
+	}
+	return postgresInstance.getStats()
+}
+
+// Private methods with actual implementation
+func (p *PostgresStorage) saveFileMetadata(metadata models.FileMetadata) error {
+	query := `
     INSERT INTO files (id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     ON CONFLICT (id) DO UPDATE SET
@@ -91,102 +139,129 @@ func (p *PostgresStorage) SaveFileMetadata(metadata models.FileMetadata) error {
         updated_at = NOW()
     `
 
-    _, err := p.db.Exec(query,
-        metadata.ID,
-        metadata.Name,
-        metadata.OriginalName,
-        metadata.Size,
-        metadata.Type,
-        metadata.Extension,
-        metadata.UploadedAt,
-        metadata.FilePath,
-        metadata.PreviewPath,
-        metadata.ShareURL,
-        "files",
-    )
+	_, err := p.db.Exec(query,
+		metadata.ID,
+		metadata.Name,
+		metadata.OriginalName,
+		metadata.Size,
+		metadata.Type,
+		metadata.Extension,
+		metadata.UploadedAt,
+		metadata.FilePath,
+		metadata.PreviewPath,
+		metadata.ShareURL,
+		"files",
+	)
 
-    return err
+	return err
 }
 
-func (p *PostgresStorage) GetFileMetadata(fileID string) (models.FileMetadata, bool) {
-    query := `
+func (p *PostgresStorage) getFileMetadata(fileID string) (models.FileMetadata, bool) {
+	query := `
     SELECT id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name
     FROM files WHERE id = $1
     `
 
-    var metadata models.FileMetadata
-    err := p.db.QueryRow(query, fileID).Scan(
-        &metadata.ID,
-        &metadata.Name,
-        &metadata.OriginalName,
-        &metadata.Size,
-        &metadata.Type,
-        &metadata.Extension,
-        &metadata.UploadedAt,
-        &metadata.FilePath,
-        &metadata.PreviewPath,
-        &metadata.ShareURL,
-        &metadata.BucketName,
-    )
+	var metadata models.FileMetadata
+	err := p.db.QueryRow(query, fileID).Scan(
+		&metadata.ID,
+		&metadata.Name,
+		&metadata.OriginalName,
+		&metadata.Size,
+		&metadata.Type,
+		&metadata.Extension,
+		&metadata.UploadedAt,
+		&metadata.FilePath,
+		&metadata.PreviewPath,
+		&metadata.ShareURL,
+		&metadata.BucketName,
+	)
 
-    if err != nil {
-        if err == sql.ErrNoRows {
-            return models.FileMetadata{}, false
-        }
-        log.Printf("Error getting file metadata: %v", err)
-        return models.FileMetadata{}, false
-    }
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return models.FileMetadata{}, false
+		}
+		log.Printf("Error getting file metadata: %v", err)
+		return models.FileMetadata{}, false
+	}
 
-    return metadata, true
+	return metadata, true
 }
 
-func (p *PostgresStorage) GetAllFileMetadata() []models.FileMetadata {
-    query := `
+func (p *PostgresStorage) getAllFileMetadata() []models.FileMetadata {
+	query := `
     SELECT id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name
     FROM files ORDER BY uploaded_at DESC
     `
 
-    rows, err := p.db.Query(query)
-    if err != nil {
-        log.Printf("Error querying all files: %v", err)
-        return []models.FileMetadata{}
-    }
-    defer rows.Close()
+	rows, err := p.db.Query(query)
+	if err != nil {
+		log.Printf("Error querying all files: %v", err)
+		return []models.FileMetadata{}
+	}
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
 
-    var files []models.FileMetadata
-    for rows.Next() {
-        var metadata models.FileMetadata
-        err := rows.Scan(
-            &metadata.ID,
-            &metadata.Name,
-            &metadata.OriginalName,
-            &metadata.Size,
-            &metadata.Type,
-            &metadata.Extension,
-            &metadata.UploadedAt,
-            &metadata.FilePath,
-            &metadata.PreviewPath,
-            &metadata.ShareURL,
-            &metadata.BucketName,
-        )
-        if err != nil {
-            log.Printf("Error scanning row: %v", err)
-            continue
-        }
-        files = append(files, metadata)
-    }
+		}
+	}(rows)
 
-    return files
+	var files []models.FileMetadata
+	for rows.Next() {
+		var metadata models.FileMetadata
+		err := rows.Scan(
+			&metadata.ID,
+			&metadata.Name,
+			&metadata.OriginalName,
+			&metadata.Size,
+			&metadata.Type,
+			&metadata.Extension,
+			&metadata.UploadedAt,
+			&metadata.FilePath,
+			&metadata.PreviewPath,
+			&metadata.ShareURL,
+			&metadata.BucketName,
+		)
+		if err != nil {
+			log.Printf("Error scanning row: %v", err)
+			continue
+		}
+		files = append(files, metadata)
+	}
+
+	return files
 }
 
-func (p *PostgresStorage) DeleteFileMetadata(fileID string) bool {
-    query := `DELETE FROM files WHERE id = $1`
-    result, err := p.db.Exec(query, fileID)
-    if err != nil {
-        log.Printf("Error deleting file metadata: %v", err)
-        return false
-    }
+func (p *PostgresStorage) deleteFileMetadata(fileID string) bool {
+	query := `DELETE FROM files WHERE id = $1`
+	result, err := p.db.Exec(query, fileID)
+	if err != nil {
+		log.Printf("Error deleting file metadata: %v", err)
+		return false
+	}
 
-    rowsAffected, _ := result.RowsAffected()
-    return rowsAffected > 0
+	rowsAffected, _ := result.RowsAffected()
+	return rowsAffected > 0
+}
+
+func (p *PostgresStorage) getStats() map[string]interface{} {
+	var totalFiles int
+	var totalSize int64
+	var latestUpload time.Time
+
+	err := p.db.QueryRow(`
+        SELECT COUNT(*), COALESCE(SUM(size), 0), COALESCE(MAX(uploaded_at), NOW())
+        FROM files
+    `).Scan(&totalFiles, &totalSize, &latestUpload)
+
+	if err != nil {
+		log.Printf("Error getting stats: %v", err)
+		return map[string]interface{}{}
+	}
+
+	return map[string]interface{}{
+		"total_files":   totalFiles,
+		"total_size_mb": float64(totalSize) / (1024 * 1024),
+		"latest_upload": latestUpload,
+	}
 }
