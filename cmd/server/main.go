@@ -16,13 +16,13 @@ import (
 func main() {
 	// Load configuration
 	cfg := configuration.Load()
-	log.Printf("🔧 Configuration loaded")
+	log.Printf("Configuration loaded")
 
 	// Initialize PostgreSQL (required)
 	if err := storage.InitializePostgres(cfg.Database.ConnectionString()); err != nil {
-		log.Fatalf("❌ Failed to initialize PostgreSQL: %v", err)
+		log.Fatalf("Failed to initialize PostgreSQL: %v", err)
 	}
-	log.Printf("✅ PostgreSQL initialized successfully")
+	log.Printf("PostgreSQL initialized successfully")
 
 	// Initialize MinIO (required)
 	if err := services.InitializeMinio(
@@ -32,19 +32,19 @@ func main() {
 		cfg.MinIO.BucketName,
 		cfg.MinIO.UseSSL,
 	); err != nil {
-		log.Fatalf("❌ Failed to initialize MinIO: %v", err)
+		log.Fatalf("Failed to initialize MinIO: %v", err)
 	}
-	log.Printf("✅ MinIO initialized successfully")
+	log.Printf("MinIO initialized successfully")
 
 	// Create necessary temp directories
 	if err := os.MkdirAll("./temp/uploads", 0755); err != nil {
-		log.Printf("⚠️ Warning: Failed to create uploads temp directory: %v", err)
+		log.Printf("Warning: Failed to create uploads temp directory: %v", err)
 	}
 	if err := os.MkdirAll("./temp/downloads", 0755); err != nil {
-		log.Printf("⚠️ Warning: Failed to create downloads temp directory: %v", err)
+		log.Printf("Warning: Failed to create downloads temp directory: %v", err)
 	}
 	if err := os.MkdirAll("./temp/previews", 0755); err != nil {
-		log.Printf("⚠️ Warning: Failed to create previews temp directory: %v", err)
+		log.Printf("Warning: Failed to create previews temp directory: %v", err)
 	}
 
 	// Set up graceful shutdown
