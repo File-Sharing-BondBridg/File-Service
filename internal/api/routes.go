@@ -27,9 +27,9 @@ func RegisterRoutes(r *gin.Engine) {
 		api.GET("/health", handlers.HealthCheck)
 
 		// File endpoints
-		api.POST("/upload", handlers.UploadFile) // upload a file
-		api.GET("/files", handlers.ListFiles)    // list all uploaded files
-		api.GET("/files/:id", handlers.GetFile)
+		api.POST("/upload", handlers.UploadFile)         // upload a file
+		api.GET("/files", handlers.ListFiles)            // list all uploaded files
+		api.GET("/files/:id", handlers.GetFile)          // Get single file
 		api.GET("/files/:id/info", handlers.GetFileInfo) // Get file metadata
 
 		// download a specific file
