@@ -57,9 +57,9 @@ jobs:
           export KUBECONFIG=kubeconfig
           kubectl get deployment file-service -o wide
 
-      - name: Logout from Docker Hub
-        if: always()
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          logout: true
+      # - name: Logout from Docker Hub
+      #   if: always()
+      #   uses: docker/login-action@v3
+      #   with:
+      #     registry: ${{ env.REGISTRY }}
+      #     logout: true
