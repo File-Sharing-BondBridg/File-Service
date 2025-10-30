@@ -3,7 +3,7 @@ name: Backend CI/CD - File Service (Docker Hub)
 on:
   push:
     paths:
-      - 'file-service/**'
+      - 'File-Service/**'
     branches: [ "main" ]
 
 env:
