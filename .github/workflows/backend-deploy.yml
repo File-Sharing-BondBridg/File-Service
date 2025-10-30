@@ -21,6 +21,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Debug - Check repository structure
+        run: |
+          echo "=== Current directory structure ==="
+          ls -la
+          echo ""
+          echo "=== All directories ==="
+          find . -maxdepth 1 -type d | sort
+          echo ""
+          echo "=== Looking for File-Service ==="
+          find . -name "*file*" -type d | head -10
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -33,8 +44,8 @@ jobs:
       - name: Build and push backend image
         uses: docker/build-push-action@v5
         with:
-          context: ./File-Service
-          file: ./File-Service/Dockerfile
+          context: .
+          file: ./Dockerfile
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           cache-from: type=gha
@@ -56,10 +67,3 @@ jobs:
         run: |
           export KUBECONFIG=kubeconfig
           kubectl get deployment file-service -o wide
-
-      # - name: Logout from Docker Hub
-      #   if: always()
-      #   uses: docker/login-action@v3
-      #   with:
-      #     registry: ${{ env.REGISTRY }}
-      #     logout: true
