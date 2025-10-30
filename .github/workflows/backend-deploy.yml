@@ -26,7 +26,6 @@ jobs:
           echo "=== Current directory structure ==="
           ls -la
           echo ""
-          echo "=== All directories ==="
           find . -maxdepth 1 -type d | sort
           echo ""
           echo "=== Looking for File-Service ==="
