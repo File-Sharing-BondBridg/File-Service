@@ -1,10 +1,12 @@
 name: Backend CI/CD - File Service (Docker Hub)
 
 on:
+  workflow_dispatch:
   push:
+    branches: [ "main" ]
     paths:
       - 'File-Service/**'
-    branches: [ "main" ]
+      - '.github/workflows/backend-deploy.yml'
 
 env:
   REGISTRY: docker.io
