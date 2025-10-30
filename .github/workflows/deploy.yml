@@ -27,12 +27,14 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    needs: build-code
     steps:
       - name: Run tests
         run: go test ./... -v
 
   code-analysis:
     runs-on: ubuntu-latest
+    needs: test
     steps:
       - uses: actions/checkout@v4
 
@@ -43,6 +45,7 @@ jobs:
 
   security-scan:
     runs-on: ubuntu-latest
+    needs: test
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -54,9 +57,9 @@ jobs:
           format: 'table'
           severity: 'HIGH,CRITICAL'
 
-  build-and-deploy:
+  build-and-deploy-image:
     runs-on: ubuntu-latest
-
+    needs: [build-code, test, code-analysis, security-scan]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
