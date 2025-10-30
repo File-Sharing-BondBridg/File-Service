@@ -27,7 +27,5 @@ func TestBasicSanity(t *testing.T) {
 
 func TestEnvironmentCheck(t *testing.T) {
 	// Add any environment-specific checks here
-	if "" == "" {
-		t.Log("Environment check passed")
-	}
+	t.Log("Environment check passed")
 }

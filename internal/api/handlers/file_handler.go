@@ -125,9 +125,13 @@ func UploadFile(c *gin.Context) {
 	// Save metadata to PostgreSQL
 	if err := storage.SaveFileMetadata(fileMetadata); err != nil {
 		// Clean up files from MinIO if metadata save fails
-		minioService.DeleteFile(objectName)
+		if deleteErr := minioService.DeleteFile(objectName); deleteErr != nil {
+			log.Printf("Warning: Failed to delete main file from storage: %v", deleteErr)
+		}
 		if previewObjectName != "" {
-			minioService.DeleteFile(previewObjectName)
+			if deleteErr := minioService.DeleteFile(previewObjectName); deleteErr != nil {
+				log.Printf("Warning: Failed to delete preview file from storage: %v", deleteErr)
+			}
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file metadata"})
 		return
@@ -142,7 +146,9 @@ func UploadFile(c *gin.Context) {
 			FileType:  fileType,
 			Operation: "upload",
 		}
-		rabbitmqService.PublishFileProcessingMessage(message)
+		if err := rabbitmqService.PublishFileProcessingMessage(message); err != nil {
+			log.Printf("Warning: Failed to publish RabbitMQ message: %v", err)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

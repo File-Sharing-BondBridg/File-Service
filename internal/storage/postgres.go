@@ -202,7 +202,7 @@ func (p *PostgresStorage) getAllFileMetadata() []models.FileMetadata {
 	defer func(rows *sql.Rows) {
 		err := rows.Close()
 		if err != nil {
-
+			log.Printf("Error closing rows: %v", err)
 		}
 	}(rows)
 

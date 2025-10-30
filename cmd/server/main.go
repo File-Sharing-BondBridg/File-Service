@@ -16,7 +16,6 @@ import (
 func main() {
 	// Load configuration
 	cfg := configuration.Load()
-	log.Printf("Configuration loaded")
 
 	// Initialize PostgreSQL (required)
 	if err := storage.InitializePostgres(cfg.Database.ConnectionString()); err != nil {
@@ -74,7 +73,7 @@ func main() {
 	r.GET("/health", func(c *gin.Context) {
 		stats := storage.GetStats()
 		minioService := services.GetMinioService()
-		minioStatus := "unknown"
+		var minioStatus string
 
 		if minioService != nil {
 			// Test MinIO connection
