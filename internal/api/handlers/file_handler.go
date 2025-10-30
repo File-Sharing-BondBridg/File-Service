@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -59,7 +60,12 @@ func UploadFile(c *gin.Context) {
 		return
 	}
 	// Always clean up the temporary local file
-	defer os.Remove(tempLocalPath)
+	defer func(name string) {
+		err := os.Remove(name)
+		if err != nil {
+			log.Println("Error removing temp file")
+		}
+	}(tempLocalPath)
 
 	// Get MinIO service
 	minioService := services.GetMinioService()
