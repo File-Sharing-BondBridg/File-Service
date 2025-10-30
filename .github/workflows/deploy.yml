@@ -17,6 +17,9 @@ jobs:
   build-code:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -24,6 +27,9 @@ jobs:
 
       - name: Install dependencies
         run: go mod tidy
+
+      - name: Build Go binary
+        run: go build -v -o bin/server ./cmd/server
 
   test:
     runs-on: ubuntu-latest
