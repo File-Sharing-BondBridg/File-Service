@@ -11,6 +11,7 @@ import (
 	"github.com/File-Sharing-BondBridg/File-Service/internal/services"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/storage"
 	"github.com/gin-gonic/gin"
+	"github.com/nats-io/nats.go"
 )
 
 func main() {
@@ -45,6 +46,8 @@ func main() {
 	if err := os.MkdirAll("./temp/previews", 0755); err != nil {
 		log.Printf("Warning: Failed to create previews temp directory: %v", err)
 	}
+
+	setupNATS()
 
 	// Set up graceful shutdown
 	setupGracefulShutdown()
@@ -111,4 +114,22 @@ func setupGracefulShutdown() {
 		log.Println("Shutting down gracefully...")
 		os.Exit(0)
 	}()
+}
+
+func setupNATS() {
+	// Connect once at startup and keep it alive
+	_, err := services.ConnectNATS(nats.DefaultURL)
+	if err != nil {
+		log.Fatal("Failed to connect to NATS:", err)
+	}
+	log.Println("Connected to NATS")
+
+	_, err = services.SubscribeNATS("test.subject", func(msg *nats.Msg) {
+		log.Printf("Test message received: %s", string(msg.Data))
+	})
+	if err != nil {
+		log.Println("Failed to subscribe to test.subject:", err)
+	} else {
+		log.Println("Subscribed to test.subject")
+	}
 }

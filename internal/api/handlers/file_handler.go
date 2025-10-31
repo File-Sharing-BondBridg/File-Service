@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	uploads "github.com/File-Sharing-BondBridg/File-Service/uploads/previews"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/nats-io/nats.go"
 )
 
 func HealthCheck(c *gin.Context) {
@@ -137,19 +139,49 @@ func UploadFile(c *gin.Context) {
 		return
 	}
 
-	// Publish message to RabbitMQ for async processing (if needed)
-	rabbitmqService := services.GetRabbitMQService()
-	if rabbitmqService != nil {
-		message := services.FileProcessingMessage{
-			FileID:    fileID,
-			FilePath:  objectName,
-			FileType:  fileType,
-			Operation: "upload",
-		}
-		if err := rabbitmqService.PublishFileProcessingMessage(message); err != nil {
-			log.Printf("Warning: Failed to publish RabbitMQ message: %v", err)
-		}
+	uploadMsg := map[string]interface{}{
+		"file_id":    fileMetadata.ID,
+		"objectName": objectName,
+		"fileType":   fileType,
+		"preview":    previewObjectName,
 	}
+
+	msgBytes, _ := json.Marshal(uploadMsg)
+
+	// Publish to NATS (subject: "uploads")
+	if err := services.PublishNATS("uploads", msgBytes); err != nil {
+		log.Printf("Warning: Failed to publish upload message to NATS: %v\n", err)
+	}
+
+	testMsg := []byte("test message")
+	if err := services.PublishNATS("test.subject", testMsg); err != nil {
+		log.Println("NATS publish failed:", err)
+	} else {
+		log.Println("NATS publish succeeded")
+	}
+
+	_, err = services.SubscribeNATS("test.subject", func(msg *nats.Msg) {
+		log.Printf("Received message on test.subject: %s", string(msg.Data))
+	})
+	if err != nil {
+		log.Println("NATS subscribe failed:", err)
+	} else {
+		log.Println("NATS subscribe succeeded")
+	}
+
+	//// Publish message to RabbitMQ for async processing (if needed)
+	//rabbitmqService := services.GetRabbitMQService()
+	//if rabbitmqService != nil {
+	//	message := services.FileProcessingMessage{
+	//		FileID:    fileID,
+	//		FilePath:  objectName,
+	//		FileType:  fileType,
+	//		Operation: "upload",
+	//	}
+	//	if err := rabbitmqService.PublishFileProcessingMessage(message); err != nil {
+	//		log.Printf("Warning: Failed to publish RabbitMQ message: %v", err)
+	//	}
+	//}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "File uploaded successfully",

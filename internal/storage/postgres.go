@@ -55,7 +55,7 @@ func (p *PostgresStorage) Connect(connectionString string) error {
 		return fmt.Errorf("failed to create tables: %v", err)
 	}
 
-	log.Println("✅ Connected to PostgreSQL successfully")
+	log.Println("Connected to PostgreSQL successfully")
 	return nil
 }
 
