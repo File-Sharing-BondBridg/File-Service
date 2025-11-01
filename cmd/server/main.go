@@ -132,4 +132,25 @@ func setupNATS() {
 	} else {
 		log.Println("Subscribed to test.subject")
 	}
+
+	subs := map[string]nats.MsgHandler{
+		"uploads.minio": func(msg *nats.Msg) {
+			log.Printf("[MinIO] Upload event received: %s", msg.Data)
+		},
+		"uploads.postgres": func(msg *nats.Msg) {
+			log.Printf("[Postgres] Metadata event received: %s", msg.Data)
+		},
+		"uploads.sync": func(msg *nats.Msg) {
+			log.Printf("[Sync] Checking consistency for: %s", msg.Data)
+		},
+	}
+
+	for subject, handler := range subs {
+		_, err := services.SubscribeNATS(subject, handler)
+		if err != nil {
+			log.Printf("Failed to subscribe to %s: %v", subject, err)
+		} else {
+			log.Printf("Subscribed to %s", subject)
+		}
+	}
 }

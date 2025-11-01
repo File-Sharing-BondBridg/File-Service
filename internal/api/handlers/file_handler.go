@@ -149,7 +149,13 @@ func UploadFile(c *gin.Context) {
 	msgBytes, _ := json.Marshal(uploadMsg)
 
 	// Publish to NATS (subject: "uploads")
-	if err := services.PublishNATS("uploads", msgBytes); err != nil {
+	if err := services.PublishNATS("uploads.minio", msgBytes); err != nil {
+		log.Printf("Warning: Failed to publish upload message to NATS: %v\n", err)
+	}
+	if err := services.PublishNATS("uploads.postgres", msgBytes); err != nil {
+		log.Printf("Warning: Failed to publish upload message to NATS: %v\n", err)
+	}
+	if err := services.PublishNATS("uploads.sync", msgBytes); err != nil {
 		log.Printf("Warning: Failed to publish upload message to NATS: %v\n", err)
 	}
 
