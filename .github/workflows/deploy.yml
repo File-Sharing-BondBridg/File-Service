@@ -80,36 +80,62 @@ jobs:
           version: latest
           install-mode: goinstall
 
-  security-scan:
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+#  security-scan:
+#    runs-on: ubuntu-latest
+#    needs: test
+#    steps:
+#      - name: Checkout code
+#        uses: actions/checkout@v4
+#
+#      - name: Run Trivy vulnerability scanner
+#        uses: aquasecurity/trivy-action@master
+#        with:
+#          image-ref: docker.io/nazim112/file-service:latest
+#          format: 'table'
+#          severity: 'HIGH,CRITICAL'
+#
+#  build-and-deploy-image:
+#    runs-on: ubuntu-latest
+#    needs: [build-code, test, code-analysis, security-scan]
+#    steps:
+#      - name: Checkout repository
+#        uses: actions/checkout@v4
+#
+#      - name: Debug - Check repository structure
+#        run: |
+#          echo "=== Current directory structure ==="
+#          ls -la
+#          echo ""
+#          find . -maxdepth 1 -type d | sort
+#          echo ""
+#          echo "=== Looking for File-Service ==="
+#          find . -name "*file*" -type d | head -10
+#
+#      - name: Set up Docker Buildx
+#        uses: docker/setup-buildx-action@v3
+#
+#      - name: Log in to Docker Hub
+#        uses: docker/login-action@v3
+#        with:
+#          username: ${{ vars.DOCKERHUB_USERNAME }}
+#          password: ${{ secrets.DOCKERHUB_TOKEN }}
+#
+#      - name: Build and push backend image
+#        uses: docker/build-push-action@v5
+#        with:
+#          context: .
+#          file: ./Dockerfile
+#          push: true
+#          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+#          cache-from: type=gha
+#          cache-to: type=gha,mode=max
 
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: docker.io/nazim112/file-service:latest
-          format: 'table'
-          severity: 'HIGH,CRITICAL'
-
-  build-and-deploy-image:
+  build-image:
     runs-on: ubuntu-latest
-    needs: [build-code, test, code-analysis, security-scan]
+    needs: [build-code, test, code-analysis]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Debug - Check repository structure
-        run: |
-          echo "=== Current directory structure ==="
-          ls -la
-          echo ""
-          find . -maxdepth 1 -type d | sort
-          echo ""
-          echo "=== Looking for File-Service ==="
-          find . -name "*file*" -type d | head -10
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -120,12 +146,71 @@ jobs:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push backend image
+      - name: Build Docker image (no push yet)
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          push: true
+          push: false
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Save built image as artifact
+        run: |
+          docker save ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} -o image.tar
+        # Upload to share with the next job
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: image.tar
+
+  scan-image:
+    runs-on: ubuntu-latest
+    needs: build-image
+    steps:
+      - name: Download built image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: .
+
+      - name: Load Docker image
+        run: docker load -i image.tar
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          format: 'table'
+          severity: 'HIGH,CRITICAL'
+
+  deploy-image:
+    runs-on: ubuntu-latest
+    needs: scan-image
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push image to Docker Hub
+        run: |
+          docker load -i image.tar
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+      # (Optional) Future step for GKE deployment
+      # - name: Deploy to GKE
+      #   run: |
+      #     echo "${{ secrets.GKE_KUBECONFIG }}" | base64 -d > kubeconfig
+      #     export KUBECONFIG=kubeconfig
+      #     kubectl set image deployment/file-service file-service=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} --record
+      #     kubectl rollout status deployment/file-service --timeout=300s
