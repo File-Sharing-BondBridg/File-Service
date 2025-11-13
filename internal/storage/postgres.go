@@ -239,6 +239,24 @@ func (p *PostgresStorage) getAllFileMetadataPerUser(userID string) []models.File
 	return files
 }
 
+func GetFilePathsForUser(userID string) ([]string, error) {
+	var paths []string
+	rows, err := postgresInstance.db.Query(`SELECT file_path FROM files WHERE user_id = $1`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, err
+		}
+		paths = append(paths, path)
+	}
+	return paths, rows.Err()
+}
+
 func (p *PostgresStorage) getUserFileMetadata(userID string) []models.FileMetadata { // Renamed and added param
 	query := `
         SELECT id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name, user_id  -- Added user_id

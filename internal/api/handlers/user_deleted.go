@@ -22,33 +22,49 @@ func HandleUserDeleted(msg *nats.Msg) {
 		return
 	}
 
-	if payload.UserID == "" {
+	userID := payload.UserID
+	if userID == "" {
 		log.Printf("[NATS] user.deleted: missing user_id")
 		nak(msg)
 		return
 	}
 
-	log.Printf("[NATS] Processing user.deleted for user_id: %s", payload.UserID)
+	log.Printf("[NATS] Processing user.deleted for user_id: %s", userID)
 
-	// 1. Delete from PostgreSQL
-	deletedCount := storage.DeleteAllFilesForUser(payload.UserID)
-	log.Printf("[NATS] Deleted %d file records for user %s", deletedCount, payload.UserID)
+	// 1. Get all file paths from DB
+	filePaths, err := storage.GetFilePathsForUser(userID)
+	if err != nil {
+		log.Printf("[NATS] Failed to get file paths: %v", err)
+		nak(msg)
+		return
+	}
+
+	if len(filePaths) == 0 {
+		log.Printf("[NATS] No files found for user %s", userID)
+	} else {
+		log.Printf("[NATS] Found %d files to delete: %v", len(filePaths), filePaths)
+	}
 
 	// 2. Delete from MinIO
 	minioSvc := services.GetMinioService()
 	if minioSvc == nil {
-		log.Printf("[NATS] MinIO service not available — skipping object deletion")
+		log.Printf("[NATS] MinIO service not available")
 	} else {
-		prefix := payload.UserID + "/" // e.g. "123e4567-e89b-12d3-a456-426614174000/"
-		if err := minioSvc.DeleteObjectsByPrefix(prefix); err != nil {
-			log.Printf("[NATS] Failed to delete MinIO objects for user %s: %v", payload.UserID, err)
-			nak(msg)
-			return
+		for _, path := range filePaths {
+			if err := minioSvc.DeleteFile(path); err != nil {
+				log.Printf("[NATS] Failed to delete MinIO object %s: %v", path, err)
+				nak(msg)
+				return
+			}
 		}
-		log.Printf("[NATS] Deleted MinIO objects with prefix: %s", prefix)
+		log.Printf("[NATS] Deleted %d MinIO objects", len(filePaths))
 	}
 
-	log.Printf("[NATS] Successfully cleaned up user %s", payload.UserID)
+	// 3. Delete from PostgreSQL
+	deletedCount := storage.DeleteAllFilesForUser(userID)
+	log.Printf("[NATS] Deleted %d file records from DB", deletedCount)
+
+	log.Printf("[NATS] Successfully cleaned up user %s", userID)
 	ack(msg)
 }
 

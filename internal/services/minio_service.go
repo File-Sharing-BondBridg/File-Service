@@ -103,23 +103,57 @@ func GetContentType(extension string) string {
 
 func (s *MinioService) DeleteObjectsByPrefix(prefix string) error {
 	ctx := context.Background()
+	log.Printf("[MinIO] Starting deletion for prefix: %s (bucket: %s)", prefix, s.bucketName)
 
-	// 1. Stream objects with prefix
+	// Check bucket exists
+	exists, err := s.client.BucketExists(ctx, s.bucketName)
+	if err != nil {
+		log.Printf("[MinIO] Bucket check failed: %v", err)
+		return err
+	}
+	if !exists {
+		log.Printf("[MinIO] Bucket '%s' does not exist", s.bucketName)
+		return nil // safe to skip
+	}
+
 	objectsCh := s.client.ListObjects(ctx, s.bucketName, minio.ListObjectsOptions{
 		Prefix:    prefix,
 		Recursive: true,
 	})
 
-	// 2. Stream directly into RemoveObjects
-	errorCh := s.client.RemoveObjects(ctx, s.bucketName, objectsCh, minio.RemoveObjectsOptions{})
+	// Debug: log if no objects
+	objectCount := 0
+	var objectKeys []string
+	for obj := range objectsCh {
+		if obj.Err != nil {
+			log.Printf("[MinIO] List error: %v", obj.Err)
+			return obj.Err
+		}
+		if obj.Key != "" {
+			objectCount++
+			objectKeys = append(objectKeys, obj.Key)
+		}
+	}
 
-	// 3. Collect errors
+	if objectCount == 0 {
+		log.Printf("[MinIO] No objects found with prefix: %s", prefix)
+		return nil
+	}
+
+	log.Printf("[MinIO] Found %d objects to delete: %v", objectCount, objectKeys)
+
+	errorCh := s.client.RemoveObjects(ctx, s.bucketName, s.client.ListObjects(ctx, s.bucketName, minio.ListObjectsOptions{
+		Prefix:    prefix,
+		Recursive: true,
+	}), minio.RemoveObjectsOptions{})
+
 	for removeErr := range errorCh {
 		if removeErr.Err != nil {
-			log.Printf("Failed to delete object %s: %v", removeErr.ObjectName, removeErr.Err)
+			log.Printf("[MinIO] Failed to delete object %s: %v", removeErr.ObjectName, removeErr.Err)
 			return removeErr.Err
 		}
 	}
 
+	log.Printf("[MinIO] Successfully deleted %d objects", objectCount)
 	return nil
 }

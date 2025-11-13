@@ -9,7 +9,7 @@ import (
 
 var nc *nats.Conn
 
-// Connect initializes the NATS connection
+// ConnectNATS Connect initializes the NATS connection
 func ConnectNATS(url string) (*nats.Conn, error) {
 	var err error
 	nc, err = nats.Connect(url,
@@ -24,7 +24,7 @@ func ConnectNATS(url string) (*nats.Conn, error) {
 	return nc, nil
 }
 
-// Publish sends a message to a subject
+// PublishNATS Publish sends a message to a subject
 func PublishNATS(subject string, msg []byte) error {
 	if nc == nil || !nc.IsConnected() {
 		return nats.ErrConnectionClosed
@@ -32,17 +32,10 @@ func PublishNATS(subject string, msg []byte) error {
 	return nc.Publish(subject, msg)
 }
 
-// Subscribe listens to a subject with a handler
+// SubscribeNATS Subscribe listens to a subject with a handler
 func SubscribeNATS(subject string, handler nats.MsgHandler) (*nats.Subscription, error) {
 	if nc == nil || !nc.IsConnected() {
 		return nil, nats.ErrConnectionClosed
 	}
 	return nc.Subscribe(subject, handler)
-}
-
-// Close closes the connection
-func CloseNATS() {
-	if nc != nil && nc.IsConnected() {
-		nc.Close()
-	}
 }
