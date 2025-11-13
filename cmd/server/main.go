@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/File-Sharing-BondBridg/File-Service/cmd/middleware"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/api"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/configuration"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/services"
@@ -18,13 +19,19 @@ func main() {
 	// Load configuration
 	cfg := configuration.Load()
 
-	// Initialize PostgreSQL (required)
+	err := middleware.InitAuth("http://localhost:8081/realms/bondbridg")
+	if err != nil {
+		log.Fatal("INIT AUTH FAILED:", err)
+	}
+
+	// Initialize PostgreSQL
 	if err := storage.InitializePostgres(cfg.Database.ConnectionString()); err != nil {
 		log.Fatalf("Failed to initialize PostgreSQL: %v", err)
 	}
+
 	log.Printf("PostgreSQL initialized successfully")
 
-	// Initialize MinIO (required)
+	// Initialize MinIO
 	if err := services.InitializeMinio(
 		cfg.MinIO.Endpoint,
 		cfg.MinIO.AccessKey,
@@ -49,13 +56,10 @@ func main() {
 
 	setupNATS()
 
-	// Set up graceful shutdown
 	setupGracefulShutdown()
 
-	// Setup router
 	r := gin.Default()
 
-	// Add CORS middleware
 	r.Use(func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -69,10 +73,6 @@ func main() {
 		c.Next()
 	})
 
-	// Register routes
-	api.RegisterRoutes(r)
-
-	// Health endpoint
 	r.GET("/health", func(c *gin.Context) {
 		stats := storage.GetStats()
 		minioService := services.GetMinioService()
@@ -98,6 +98,9 @@ func main() {
 			"stats": stats,
 		})
 	})
+
+	apiGroup := r.Group("/api")
+	api.RegisterRoutes(apiGroup)
 
 	log.Printf("Server starting on :%s", cfg.Server.Port)
 	if err := r.Run(":" + cfg.Server.Port); err != nil {

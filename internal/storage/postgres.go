@@ -75,11 +75,13 @@ func (p *PostgresStorage) createTables() error {
         bucket_name VARCHAR(100) DEFAULT 'files',
         is_processed BOOLEAN DEFAULT false,
         created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        user_id UUID NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_files_uploaded_at ON files(uploaded_at DESC);
     CREATE INDEX IF NOT EXISTS idx_files_type ON files(type);
+	CREATE INDEX IF NOT EXISTS idx_files_user_id ON files(user_id);
     `
 
 	_, err := p.db.Exec(query)
@@ -87,6 +89,7 @@ func (p *PostgresStorage) createTables() error {
 }
 
 // Public functions - directly callable from handlers
+
 func SaveFileMetadata(metadata models.FileMetadata) error {
 	if postgresInstance == nil {
 		return fmt.Errorf("postgres storage not initialized")
@@ -101,18 +104,18 @@ func GetFileMetadata(fileID string) (models.FileMetadata, bool) {
 	return postgresInstance.getFileMetadata(fileID)
 }
 
-func GetAllFileMetadata() []models.FileMetadata {
+func GetUserFileMetadata(userID string) []models.FileMetadata { // Renamed public func
 	if postgresInstance == nil {
 		return []models.FileMetadata{}
 	}
-	return postgresInstance.getAllFileMetadata()
+	return postgresInstance.getUserFileMetadata(userID) // Renamed private call
 }
 
-func DeleteFileMetadata(fileID string) bool {
+func DeleteFileMetadata(fileID, userID string) bool {
 	if postgresInstance == nil {
 		return false
 	}
-	return postgresInstance.deleteFileMetadata(fileID)
+	return postgresInstance.deleteFileMetadata(fileID, userID)
 }
 
 func GetStats() map[string]interface{} {
@@ -125,8 +128,8 @@ func GetStats() map[string]interface{} {
 // Private methods with actual implementation
 func (p *PostgresStorage) saveFileMetadata(metadata models.FileMetadata) error {
 	query := `
-    INSERT INTO files (id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    INSERT INTO files (id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name, user_id)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
     ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         original_name = EXCLUDED.original_name,
@@ -136,6 +139,7 @@ func (p *PostgresStorage) saveFileMetadata(metadata models.FileMetadata) error {
         file_path = EXCLUDED.file_path,
         preview_path = EXCLUDED.preview_path,
         share_url = EXCLUDED.share_url,
+        user_id = EXCLUDED.user_id,
         updated_at = NOW()
     `
 
@@ -151,6 +155,7 @@ func (p *PostgresStorage) saveFileMetadata(metadata models.FileMetadata) error {
 		metadata.PreviewPath,
 		metadata.ShareURL,
 		"files",
+		metadata.UserID,
 	)
 
 	return err
@@ -158,7 +163,7 @@ func (p *PostgresStorage) saveFileMetadata(metadata models.FileMetadata) error {
 
 func (p *PostgresStorage) getFileMetadata(fileID string) (models.FileMetadata, bool) {
 	query := `
-    SELECT id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name
+    SELECT id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name, user_id
     FROM files WHERE id = $1
     `
 
@@ -175,6 +180,7 @@ func (p *PostgresStorage) getFileMetadata(fileID string) (models.FileMetadata, b
 		&metadata.PreviewPath,
 		&metadata.ShareURL,
 		&metadata.BucketName,
+		&metadata.UserID,
 	)
 
 	if err != nil {
@@ -188,13 +194,13 @@ func (p *PostgresStorage) getFileMetadata(fileID string) (models.FileMetadata, b
 	return metadata, true
 }
 
-func (p *PostgresStorage) getAllFileMetadata() []models.FileMetadata {
+func (p *PostgresStorage) getAllFileMetadataPerUser(userID string) []models.FileMetadata {
 	query := `
-    SELECT id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name
-    FROM files ORDER BY uploaded_at DESC
+    SELECT id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name, user_id
+    FROM files WHERE user_id = $1 ORDER BY uploaded_at DESC
     `
 
-	rows, err := p.db.Query(query)
+	rows, err := p.db.Query(query, userID)
 	if err != nil {
 		log.Printf("Error querying all files: %v", err)
 		return []models.FileMetadata{}
@@ -221,6 +227,7 @@ func (p *PostgresStorage) getAllFileMetadata() []models.FileMetadata {
 			&metadata.PreviewPath,
 			&metadata.ShareURL,
 			&metadata.BucketName,
+			&metadata.UserID,
 		)
 		if err != nil {
 			log.Printf("Error scanning row: %v", err)
@@ -232,9 +239,51 @@ func (p *PostgresStorage) getAllFileMetadata() []models.FileMetadata {
 	return files
 }
 
-func (p *PostgresStorage) deleteFileMetadata(fileID string) bool {
-	query := `DELETE FROM files WHERE id = $1`
-	result, err := p.db.Exec(query, fileID)
+func (p *PostgresStorage) getUserFileMetadata(userID string) []models.FileMetadata { // Renamed and added param
+	query := `
+        SELECT id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name, user_id  -- Added user_id
+        FROM files WHERE user_id = $1 ORDER BY uploaded_at DESC  -- Added WHERE clause
+    `
+	rows, err := p.db.Query(query, userID) // Pass userID
+	if err != nil {
+		log.Printf("Error querying user files: %v", err)
+		return []models.FileMetadata{}
+	}
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			log.Printf("Error closing rows: %v", err)
+		}
+	}(rows)
+	var files []models.FileMetadata
+	for rows.Next() {
+		var metadata models.FileMetadata
+		err := rows.Scan(
+			&metadata.ID,
+			&metadata.Name,
+			&metadata.OriginalName,
+			&metadata.Size,
+			&metadata.Type,
+			&metadata.Extension,
+			&metadata.UploadedAt,
+			&metadata.FilePath,
+			&metadata.PreviewPath,
+			&metadata.ShareURL,
+			&metadata.BucketName,
+			&metadata.UserID,
+		)
+		if err != nil {
+			log.Printf("Error scanning row: %v", err)
+			continue
+		}
+		files = append(files, metadata)
+	}
+	return files
+}
+
+func (p *PostgresStorage) deleteFileMetadata(fileID, userID string) bool {
+	query := `DELETE FROM files WHERE id = $1 AND user_id = $2` // Added AND user_id
+	result, err := p.db.Exec(query, fileID, userID)
 	if err != nil {
 		log.Printf("Error deleting file metadata: %v", err)
 		return false

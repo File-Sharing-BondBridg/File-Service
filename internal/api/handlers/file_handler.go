@@ -23,6 +23,14 @@ func HealthCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
+func userIDFromContext(c *gin.Context) (string, bool) {
+	id, exists := c.Get("user_id")
+	if !exists {
+		return "", false
+	}
+	return id.(string), true
+}
+
 func UploadFile(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
@@ -110,6 +118,12 @@ func UploadFile(c *gin.Context) {
 		}
 	}
 
+	userID, ok := userIDFromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+		return
+	}
+
 	// Create file metadata
 	fileMetadata := models.FileMetadata{
 		ID:           fileID,
@@ -122,6 +136,7 @@ func UploadFile(c *gin.Context) {
 		FilePath:     objectName,        // MinIO object name
 		PreviewPath:  previewObjectName, // MinIO preview object name
 		ShareURL:     "",                // Will be set when shared
+		UserID:       userID,
 	}
 
 	// Save metadata to PostgreSQL
@@ -175,20 +190,6 @@ func UploadFile(c *gin.Context) {
 		log.Println("NATS subscribe succeeded")
 	}
 
-	//// Publish message to RabbitMQ for async processing (if needed)
-	//rabbitmqService := services.GetRabbitMQService()
-	//if rabbitmqService != nil {
-	//	message := services.FileProcessingMessage{
-	//		FileID:    fileID,
-	//		FilePath:  objectName,
-	//		FileType:  fileType,
-	//		Operation: "upload",
-	//	}
-	//	if err := rabbitmqService.PublishFileProcessingMessage(message); err != nil {
-	//		log.Printf("Warning: Failed to publish RabbitMQ message: %v", err)
-	//	}
-	//}
-
 	c.JSON(http.StatusOK, gin.H{
 		"message": "File uploaded successfully",
 		"file":    fileMetadata,
@@ -203,6 +204,11 @@ func GetFile(c *gin.Context) {
 	metadata, exists := storage.GetFileMetadata(id)
 	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+	userID, _ := c.Get("user_id")
+	if metadata.UserID != userID.(string) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
 	}
 
@@ -231,8 +237,12 @@ func GetFile(c *gin.Context) {
 
 func ListFiles(c *gin.Context) {
 	// Get all files from PostgreSQL
-	files := storage.GetAllFileMetadata()
-
+	userID, exists := userIDFromContext(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+	files := storage.GetUserFileMetadata(userID) // Updated call
 	c.JSON(http.StatusOK, gin.H{
 		"files": files,
 	})
@@ -267,7 +277,12 @@ func GetPreview(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create temp directory"})
 		return
 	}
-	defer os.Remove(tempPath) // Clean up after serving
+	defer func(name string) {
+		err := os.Remove(name)
+		if err != nil {
+
+		}
+	}(tempPath) // Clean up after serving
 
 	if err := minioService.DownloadFile(metadata.PreviewPath, tempPath); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Preview file not found"})
@@ -292,6 +307,11 @@ func DeleteFile(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 		return
 	}
+	userID, _ := userIDFromContext(c)
+	if metadata.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
 
 	// Get MinIO service
 	minioService := services.GetMinioService()
@@ -314,7 +334,7 @@ func DeleteFile(c *gin.Context) {
 	}
 
 	// Delete metadata from PostgreSQL
-	if storage.DeleteFileMetadata(fileID) {
+	if storage.DeleteFileMetadata(fileID, userID) {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "File deleted successfully",
 			"file_id": fileID,
@@ -331,6 +351,11 @@ func DownloadFile(c *gin.Context) {
 	metadata, exists := storage.GetFileMetadata(id)
 	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+	userID, _ := c.Get("user_id")
+	if metadata.UserID != userID.(string) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
 	}
 
@@ -370,6 +395,11 @@ func GetFileInfo(c *gin.Context) {
 	metadata, exists := storage.GetFileMetadata(id)
 	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+	userID, _ := c.Get("user_id")
+	if metadata.UserID != userID.(string) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
 	}
 

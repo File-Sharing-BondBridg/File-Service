@@ -16,4 +16,5 @@ type FileMetadata struct {
 	PreviewPath  string    `json:"preview_path"`
 	ShareURL     string    `json:"share_url"`
 	BucketName   string    `json:"bucket_name"`
+	UserID       string    `json:"user_id,omitempty"`
 }

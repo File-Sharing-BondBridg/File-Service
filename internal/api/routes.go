@@ -1,6 +1,7 @@
 package api
 
 import (
+	"github.com/File-Sharing-BondBridg/File-Service/cmd/middleware"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/api/handlers"
 	"github.com/gin-gonic/gin"
 )
@@ -18,24 +19,25 @@ func corsMiddleware() gin.HandlerFunc {
 	}
 }
 
-func RegisterRoutes(r *gin.Engine) {
+func RegisterRoutes(r *gin.RouterGroup) {
 	// Enable CORS for preflight requests
-	r.Use(corsMiddleware())
+	r.Use(middleware.RequireAuth())
 
-	api := r.Group("/api")
-	{
-		api.GET("/health", handlers.HealthCheck)
+	//api := r.Group("/api")
+	//api.Use(middleware.RequireAuth())
+	//{
+	//}
+	r.GET("/health", handlers.HealthCheck)
 
-		// File endpoints
-		api.POST("/upload", handlers.UploadFile)         // upload a file
-		api.GET("/files", handlers.ListFiles)            // list all uploaded files
-		api.GET("/files/:id", handlers.GetFile)          // Get single file
-		api.GET("/files/:id/info", handlers.GetFileInfo) // Get file metadata
+	// File endpoints
+	r.POST("/upload", handlers.UploadFile)         // upload a file
+	r.GET("/files", handlers.ListFiles)            // list all uploaded files
+	r.GET("/files/:id", handlers.GetFile)          // Get single file
+	r.GET("/files/:id/info", handlers.GetFileInfo) // Get file metadata
 
-		// download a specific file
-		api.GET("/preview/:id", handlers.GetPreview)          // fetch preview of a file
-		api.GET("/files/:id/download", handlers.DownloadFile) // Download file
-		api.GET("/files/:id/preview", handlers.GetPreview)    // Get preview
-		api.DELETE("/files/:id/delete", handlers.DeleteFile)  // Delete file
-	}
+	// Download a specific file
+	r.GET("/preview/:id", handlers.GetPreview)          // fetch preview of a file
+	r.GET("/files/:id/download", handlers.DownloadFile) // Download file
+	r.GET("/files/:id/preview", handlers.GetPreview)    // Get preview
+	r.DELETE("/files/:id/delete", handlers.DeleteFile)  // Delete file
 }
