@@ -8,6 +8,7 @@ import (
 
 	"github.com/File-Sharing-BondBridg/File-Service/cmd/middleware"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/api"
+	"github.com/File-Sharing-BondBridg/File-Service/internal/api/handlers"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/configuration"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/services"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/storage"
@@ -146,6 +147,7 @@ func setupNATS() {
 		"uploads.sync": func(msg *nats.Msg) {
 			log.Printf("[Sync] Checking consistency for: %s", msg.Data)
 		},
+		"user.deleted": handlers.HandleUserDeleted,
 	}
 
 	for subject, handler := range subs {

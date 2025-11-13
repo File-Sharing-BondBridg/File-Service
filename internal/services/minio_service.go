@@ -52,7 +52,7 @@ func GetMinioService() *MinioService {
 	return minioInstance
 }
 
-// Add this method for health checks
+// CheckConnection Add this method for health checks
 func (m *MinioService) CheckConnection() error {
 	if m == nil || m.client == nil {
 		return fmt.Errorf("minio service not initialized")
@@ -81,7 +81,7 @@ func (m *MinioService) GetFileURL(objectName string) string {
 	return fmt.Sprintf("/files/%s", objectName)
 }
 
-// Helper function to determine content type
+// GetContentType Helper function to determine content type
 func GetContentType(extension string) string {
 	switch extension {
 	case ".jpg", ".jpeg":
@@ -99,4 +99,27 @@ func GetContentType(extension string) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+func (s *MinioService) DeleteObjectsByPrefix(prefix string) error {
+	ctx := context.Background()
+
+	// 1. Stream objects with prefix
+	objectsCh := s.client.ListObjects(ctx, s.bucketName, minio.ListObjectsOptions{
+		Prefix:    prefix,
+		Recursive: true,
+	})
+
+	// 2. Stream directly into RemoveObjects
+	errorCh := s.client.RemoveObjects(ctx, s.bucketName, objectsCh, minio.RemoveObjectsOptions{})
+
+	// 3. Collect errors
+	for removeErr := range errorCh {
+		if removeErr.Err != nil {
+			log.Printf("Failed to delete object %s: %v", removeErr.ObjectName, removeErr.Err)
+			return removeErr.Err
+		}
+	}
+
+	return nil
 }

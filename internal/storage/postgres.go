@@ -314,3 +314,20 @@ func (p *PostgresStorage) getStats() map[string]interface{} {
 		"latest_upload": latestUpload,
 	}
 }
+
+func DeleteAllFilesForUser(userID string) int {
+	if postgresInstance == nil {
+		return 0
+	}
+	return postgresInstance.deleteAllFilesForUser(userID)
+}
+
+func (p *PostgresStorage) deleteAllFilesForUser(userID string) int {
+	res, err := p.db.Exec(`DELETE FROM files WHERE user_id = $1`, userID)
+	if err != nil {
+		log.Printf("Failed to delete files for user %s: %v", userID, err)
+		return 0
+	}
+	count, _ := res.RowsAffected()
+	return int(count)
+}
