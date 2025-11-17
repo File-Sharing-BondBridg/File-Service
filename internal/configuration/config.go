@@ -6,10 +6,11 @@ import (
 )
 
 type Config struct {
-	Database DatabaseConfig
-	MinIO    MinIOConfig
-	Server   ServerConfig
-	NATSURL  string
+	Database    DatabaseConfig
+	MinIO       MinIOConfig
+	Server      ServerConfig
+	NATSURL     string
+	KeycloakUrl string
 }
 
 type DatabaseConfig struct {
@@ -53,7 +54,8 @@ func Load() *Config {
 		Server: ServerConfig{
 			Port: getEnv("SERVER_PORT", "8080"),
 		},
-		NATSURL: getEnv("NATS_URL", "nats://localhost:4222"),
+		NATSURL:     getEnv("NATS_URL", "nats://localhost:4222"),
+		KeycloakUrl: getEnv("KEYCLOAK_URL", "http://localhost:8081/realms/bondbridg"),
 	}
 }
 

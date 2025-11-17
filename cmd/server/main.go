@@ -20,7 +20,7 @@ func main() {
 	// Load configuration
 	cfg := configuration.Load()
 
-	err := middleware.InitAuth("http://localhost:8081/realms/bondbridg")
+	err := middleware.InitAuth(cfg.KeycloakUrl)
 	if err != nil {
 		log.Fatal("INIT AUTH FAILED:", err)
 	}
@@ -55,7 +55,7 @@ func main() {
 		log.Printf("Warning: Failed to create previews temp directory: %v", err)
 	}
 
-	setupNATS()
+	setupNATS(cfg.NATSURL)
 
 	setupGracefulShutdown()
 
@@ -120,9 +120,9 @@ func setupGracefulShutdown() {
 	}()
 }
 
-func setupNATS() {
+func setupNATS(natsUrl string) {
 	// Connect once at startup and keep it alive
-	_, err := services.ConnectNATS(nats.DefaultURL)
+	_, err := services.ConnectNATS(natsUrl)
 	if err != nil {
 		log.Fatal("Failed to connect to NATS:", err)
 	}
