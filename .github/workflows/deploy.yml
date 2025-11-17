@@ -85,7 +85,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # Required for SonarCloud to compute new code
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -125,18 +125,18 @@ jobs:
           context: .
           file: ./Dockerfile
           push: false
-          load: true                                      # ← loads into docker daemon
+          load: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          outputs: type=docker,dest=/tmp/image.tar        # optional: for extra caching
+          outputs: type=docker,dest=/tmp/image.tar
 
       - name: Trivy vulnerability scan (blocks on HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          image-ref: nazim112/file-service@sha256:${{ steps.build.outputs.digest }}
           format: table
-          exit-code: '1'               # ← fails the job if HIGH/CRITICAL found
+          exit-code: '1'
           severity: HIGH,CRITICAL
           ignore-unfixed: true
 
