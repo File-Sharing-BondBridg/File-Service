@@ -65,6 +65,7 @@ jobs:
 
   gitguardian-scan:
     runs-on: ubuntu-latest
+    needs: test
     permissions:
       contents: read
     steps:
@@ -99,96 +100,50 @@ jobs:
           key: ${{ runner.os }}-sonar-scanner-${{ hashFiles('.sonar/cloud.properties') }}
           restore-keys: ${{ runner.os }}-sonar-scanner-
 
-  build-image:
+  build-and-scan:
     runs-on: ubuntu-latest
-    needs: [ build-code, test, code-analysis ]
+    needs: [ test, code-analysis, gitguardian-scan ]
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Hub
+      - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Cache Docker layers (GitHub Actions Cache)
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
-
-      - name: Build and push (with full cache + multi-layer export)
+      - name: Build image + export to docker daemon (do NOT push yet)
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          push: false
+          load: true                                      # ← loads into docker daemon
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # This is the magic: export cache to filesystem for next run
-          outputs: type=cacheonly
+          outputs: type=docker,dest=/tmp/image.tar        # optional: for extra caching
 
-      - name: Export image for Trivy scan (fast, uses cache)
-        run: |
-          docker buildx build --load \
-            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
-            --cache-from=type=gha \
-            .
-
-  scan-image:
-    runs-on: ubuntu-latest
-    needs: build-image
-    steps:
-      - name: Download built image
-        uses: actions/download-artifact@v4
-        with:
-          name: docker-image
-          path: .
-
-      - name: Load Docker image
-        run: docker load -i image.tar
-
-      - name: Run Trivy vulnerability scanner
+      - name: Trivy vulnerability scan (blocks on HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          format: 'table'
-          severity: 'HIGH,CRITICAL'
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: table
+          exit-code: '1'               # ← fails the job if HIGH/CRITICAL found
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
 
-  deploy-image:
-    runs-on: ubuntu-latest
-    needs: scan-image
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download image artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: docker-image
-
-      - name: Load Docker image
-        run: docker load -i image.tar
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Push image to Docker Hub
+      - name: Push image (only if Trivy passed)
         run: |
-          docker load -i image.tar
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+                     ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          echo "Image pushed safely: ${{ steps.build.outputs.digest }}"
