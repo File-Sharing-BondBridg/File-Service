@@ -56,7 +56,7 @@ jobs:
           fetch-depth: 0
 
       - name: GitGuardian scan
-        uses: GitGuardian/ggshield-action@e11574f7ecb4821478524a6484ce8addd61ab797d0f11955e81def05ce3d3166
+        uses: GitGuardian/ggshield-action@v1.45.0
         env:
           GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
 
