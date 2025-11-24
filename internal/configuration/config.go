@@ -11,6 +11,7 @@ type Config struct {
 	Server      ServerConfig
 	NATSURL     string
 	KeycloakUrl string
+	CLAMAVURL   string
 }
 
 type DatabaseConfig struct {
@@ -55,6 +56,7 @@ func Load() *Config {
 			Port: getEnv("SERVER_PORT", "8080"),
 		},
 		NATSURL:     getEnv("NATS_URL", "nats://localhost:4222"),
+		CLAMAVURL:   getEnv("CLAMAV_URL", "tcp://localhost:3310"),
 		KeycloakUrl: getEnv("KEYCLOAK_URL", "http://localhost:8081/realms/bondbridg"),
 	}
 }

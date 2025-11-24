@@ -1,8 +1,9 @@
-package storage
+package services
 
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -74,17 +75,42 @@ func (p *PostgresStorage) createTables() error {
         share_url VARCHAR(500),
         bucket_name VARCHAR(100) DEFAULT 'files',
         is_processed BOOLEAN DEFAULT false,
+        scan_status VARCHAR(50) DEFAULT 'pending',
+        scanned_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         user_id UUID NOT NULL
     );
+    `
+	_, err := p.db.Exec(query)
+	if err != nil {
+		return err
+	}
 
+	// Idempotent: Add columns if missing (safe on restarts)
+	alterQueries := []string{
+		`ALTER TABLE files ADD COLUMN IF NOT EXISTS scan_status VARCHAR(50) DEFAULT 'pending'`,
+		`ALTER TABLE files ADD COLUMN IF NOT EXISTS scanned_at TIMESTAMPTZ`,
+		// Optional: Update existing rows to 'pending' if needed
+		// `UPDATE files SET scan_status = 'pending' WHERE scan_status IS NULL`,
+	}
+	for _, altQuery := range alterQueries {
+		_, err := p.db.Exec(altQuery)
+		if err != nil {
+			// Log but don't fail—some DBs may error if column exists
+			log.Printf("Warning during ALTER: %v", err)
+		}
+	}
+
+	// Indexes
+	indexQuery := `
     CREATE INDEX IF NOT EXISTS idx_files_uploaded_at ON files(uploaded_at DESC);
     CREATE INDEX IF NOT EXISTS idx_files_type ON files(type);
-	CREATE INDEX IF NOT EXISTS idx_files_user_id ON files(user_id);
+    CREATE INDEX IF NOT EXISTS idx_files_user_id ON files(user_id);
+    CREATE INDEX IF NOT EXISTS idx_files_scan_status ON files(scan_status);
     `
 
-	_, err := p.db.Exec(query)
+	_, err = p.db.Exec(indexQuery)
 	return err
 }
 
@@ -111,6 +137,22 @@ func GetUserFileMetadata(userID string) []models.FileMetadata { // Renamed publi
 	return postgresInstance.getUserFileMetadata(userID) // Renamed private call
 }
 
+// GetUserFileMetadataPage returns a paginated list of files for a user
+func GetUserFileMetadataPage(userID string, limit, offset int) ([]models.FileMetadata, error) {
+	if postgresInstance == nil {
+		return []models.FileMetadata{}, fmt.Errorf("postgres storage not initialized")
+	}
+	return postgresInstance.getUserFileMetadataPage(userID, limit, offset)
+}
+
+// GetUserFileCount returns total number of files for a user
+func GetUserFileCount(userID string) (int64, error) {
+	if postgresInstance == nil {
+		return 0, fmt.Errorf("postgres storage not initialized")
+	}
+	return postgresInstance.getUserFileCount(userID)
+}
+
 func DeleteFileMetadata(fileID, userID string) bool {
 	if postgresInstance == nil {
 		return false
@@ -128,8 +170,8 @@ func GetStats() map[string]interface{} {
 // Private methods with actual implementation
 func (p *PostgresStorage) saveFileMetadata(metadata models.FileMetadata) error {
 	query := `
-    INSERT INTO files (id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name, user_id)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    INSERT INTO files (id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name, user_id, scan_status)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         original_name = EXCLUDED.original_name,
@@ -140,6 +182,7 @@ func (p *PostgresStorage) saveFileMetadata(metadata models.FileMetadata) error {
         preview_path = EXCLUDED.preview_path,
         share_url = EXCLUDED.share_url,
         user_id = EXCLUDED.user_id,
+        scan_status = EXCLUDED.scan_status,
         updated_at = NOW()
     `
 
@@ -156,6 +199,7 @@ func (p *PostgresStorage) saveFileMetadata(metadata models.FileMetadata) error {
 		metadata.ShareURL,
 		"files",
 		metadata.UserID,
+		"pending",
 	)
 
 	return err
@@ -163,7 +207,7 @@ func (p *PostgresStorage) saveFileMetadata(metadata models.FileMetadata) error {
 
 func (p *PostgresStorage) getFileMetadata(fileID string) (models.FileMetadata, bool) {
 	query := `
-    SELECT id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name, user_id
+    SELECT id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name, user_id, scan_status, scanned_at
     FROM files WHERE id = $1
     `
 
@@ -181,10 +225,12 @@ func (p *PostgresStorage) getFileMetadata(fileID string) (models.FileMetadata, b
 		&metadata.ShareURL,
 		&metadata.BucketName,
 		&metadata.UserID,
+		&metadata.ScanStatus,
+		&metadata.ScannedAt,
 	)
 
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return models.FileMetadata{}, false
 		}
 		log.Printf("Error getting file metadata: %v", err)
@@ -196,7 +242,7 @@ func (p *PostgresStorage) getFileMetadata(fileID string) (models.FileMetadata, b
 
 func (p *PostgresStorage) getAllFileMetadataPerUser(userID string) []models.FileMetadata {
 	query := `
-    SELECT id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name, user_id
+    SELECT id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name, user_id, scan_status, scanned_at
     FROM files WHERE user_id = $1 ORDER BY uploaded_at DESC
     `
 
@@ -228,6 +274,8 @@ func (p *PostgresStorage) getAllFileMetadataPerUser(userID string) []models.File
 			&metadata.ShareURL,
 			&metadata.BucketName,
 			&metadata.UserID,
+			&metadata.ScanStatus,
+			&metadata.ScannedAt,
 		)
 		if err != nil {
 			log.Printf("Error scanning row: %v", err)
@@ -299,6 +347,59 @@ func (p *PostgresStorage) getUserFileMetadata(userID string) []models.FileMetada
 	return files
 }
 
+// getUserFileMetadataPage returns a page of files for a user
+func (p *PostgresStorage) getUserFileMetadataPage(userID string, limit, offset int) ([]models.FileMetadata, error) {
+	query := `
+        SELECT id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name, user_id
+        FROM files WHERE user_id = $1 ORDER BY uploaded_at DESC LIMIT $2 OFFSET $3
+    `
+	rows, err := p.db.Query(query, userID, limit, offset)
+	if err != nil {
+		log.Printf("Error querying paginated user files: %v", err)
+		return []models.FileMetadata{}, err
+	}
+	defer func(rows *sql.Rows) {
+		if cerr := rows.Close(); cerr != nil {
+			log.Printf("Error closing rows: %v", cerr)
+		}
+	}(rows)
+	var files []models.FileMetadata
+	for rows.Next() {
+		var metadata models.FileMetadata
+		if err := rows.Scan(
+			&metadata.ID,
+			&metadata.Name,
+			&metadata.OriginalName,
+			&metadata.Size,
+			&metadata.Type,
+			&metadata.Extension,
+			&metadata.UploadedAt,
+			&metadata.FilePath,
+			&metadata.PreviewPath,
+			&metadata.ShareURL,
+			&metadata.BucketName,
+			&metadata.UserID,
+		); err != nil {
+			log.Printf("Error scanning row: %v", err)
+			continue
+		}
+		files = append(files, metadata)
+	}
+	return files, nil
+}
+
+// getUserFileCount counts total files for a user
+func (p *PostgresStorage) getUserFileCount(userID string) (int64, error) {
+	query := `SELECT COUNT(*) FROM files WHERE user_id = $1`
+	var total int64
+	err := p.db.QueryRow(query, userID).Scan(&total)
+	if err != nil {
+		log.Printf("Error counting user files: %v", err)
+		return 0, err
+	}
+	return total, nil
+}
+
 func (p *PostgresStorage) deleteFileMetadata(fileID, userID string) bool {
 	query := `DELETE FROM files WHERE id = $1 AND user_id = $2` // Added AND user_id
 	result, err := p.db.Exec(query, fileID, userID)
@@ -348,4 +449,20 @@ func (p *PostgresStorage) deleteAllFilesForUser(userID string) int {
 	}
 	count, _ := res.RowsAffected()
 	return int(count)
+}
+
+func UpdateFileScanStatus(id string, status string, now time.Time) error { // Changed return to error for consistency
+	if postgresInstance == nil {
+		return fmt.Errorf("postgres storage not initialized")
+	}
+	return postgresInstance.updateFileScanStatus(id, status, now)
+}
+
+func (p *PostgresStorage) updateFileScanStatus(fileID, status string, scannedAt time.Time) error {
+	query := `UPDATE files SET scan_status = $1, scanned_at = $2, updated_at = NOW() WHERE id = $3` // Added updated_at
+	_, err := p.db.Exec(query, status, scannedAt, fileID)
+	if err != nil {
+		log.Printf("Failed to update scan status for %s: %v", fileID, err) // Log here too
+	}
+	return err
 }

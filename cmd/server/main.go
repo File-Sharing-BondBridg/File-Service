@@ -1,17 +1,18 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/File-Sharing-BondBridg/File-Service/cmd/middleware"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/api"
-	"github.com/File-Sharing-BondBridg/File-Service/internal/api/handlers"
+	"github.com/File-Sharing-BondBridg/File-Service/internal/api/handlers/util"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/configuration"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/services"
-	"github.com/File-Sharing-BondBridg/File-Service/internal/storage"
 	"github.com/gin-gonic/gin"
 	"github.com/nats-io/nats.go"
 )
@@ -26,7 +27,7 @@ func main() {
 	}
 
 	// Initialize PostgreSQL
-	if err := storage.InitializePostgres(cfg.Database.ConnectionString()); err != nil {
+	if err := services.InitializePostgres(cfg.Database.ConnectionString()); err != nil {
 		log.Fatalf("Failed to initialize PostgreSQL: %v", err)
 	}
 
@@ -55,7 +56,7 @@ func main() {
 		log.Printf("Warning: Failed to create previews temp directory: %v", err)
 	}
 
-	setupNATS(cfg.NATSURL)
+	setupNATS(cfg.NATSURL, cfg.CLAMAVURL)
 
 	setupGracefulShutdown()
 
@@ -75,7 +76,7 @@ func main() {
 	})
 
 	r.GET("/health", func(c *gin.Context) {
-		stats := storage.GetStats()
+		stats := services.GetStats()
 		minioService := services.GetMinioService()
 		var minioStatus string
 
@@ -120,42 +121,84 @@ func setupGracefulShutdown() {
 	}()
 }
 
-func setupNATS(natsUrl string) {
-	// Connect once at startup and keep it alive
-	_, err := services.ConnectNATS(natsUrl)
+func setupNATS(natsUrl, clamAvUrl string) {
+	_, jsCtx, err := services.ConnectNATS(natsUrl)
 	if err != nil {
-		log.Fatal("Failed to connect to NATS:", err)
+		log.Fatal("Failed to connect to NATS/JetStream:", err)
 	}
-	log.Println("Connected to NATS")
+	_ = jsCtx // keep for possible advanced usage
 
-	_, err = services.SubscribeNATS("test.subject", func(msg *nats.Msg) {
-		log.Printf("Test message received: %s", string(msg.Data))
+	// Create/verify JetStream stream (idempotent; covers files.* and users.* subjects)
+	streamCfg := &nats.StreamConfig{
+		Name:      "file-events",                  // Choose a descriptive name
+		Subjects:  []string{"files.*", "users.*"}, // Matches your event subjects
+		Retention: nats.WorkQueuePolicy,           // Or nats.LimitsPolicy for interest-based
+		Storage:   nats.FileStorage,               // Persistent storage
+		Discard:   nats.DiscardNew,                // Don't discard old messages
+	}
+	if _, err := jsCtx.AddStream(streamCfg); err != nil {
+		if !strings.Contains(err.Error(), "stream name already in use") {
+			log.Printf("Warning: Failed to create/verify stream: %v", err)
+		} else {
+			log.Println("Stream 'file-events' already exists")
+		}
+	} else {
+		log.Println("JetStream stream 'file-events' created")
+	}
+
+	// Subscribe to files.uploaded (durable consumer)
+	_, err = services.SubscribeEvent("files.uploaded", "file_service_preview", func(msg *nats.Msg) {
+		log.Printf("[JetStream] files.uploaded message: %s", string(msg.Data))
+
+		var event map[string]interface{}
+		if err := json.Unmarshal(msg.Data, &event); err != nil {
+			log.Println("Invalid event:", err)
+			msg.Nak()
+			return
+		}
+
+		// Extract with type assertions (add more fields as needed)
+		fileID, ok := event["file_id"].(string)
+		if !ok {
+			log.Println("Missing or invalid file_id")
+			msg.Nak()
+			return
+		}
+
+		filePath, ok := event["object_name"].(string) // Fixed: snake_case
+		if !ok {
+			log.Println("Missing or invalid object_name")
+			msg.Nak()
+			return
+		}
+
+		util.ScanFile(fileID, filePath, clamAvUrl)
+
+		if err := msg.Ack(); err != nil {
+			log.Printf("[JetStream] ack failed: %v", err)
+		}
 	})
 	if err != nil {
-		log.Println("Failed to subscribe to test.subject:", err)
+		log.Printf("Failed to subscribe to files.uploaded: %v", err)
 	} else {
-		log.Println("Subscribed to test.subject")
+		log.Println("Subscribed to files.uploaded (durable preview consumer)")
 	}
 
-	subs := map[string]nats.MsgHandler{
-		"uploads.minio": func(msg *nats.Msg) {
-			log.Printf("[MinIO] Upload event received: %s", msg.Data)
-		},
-		"uploads.postgres": func(msg *nats.Msg) {
-			log.Printf("[Postgres] Metadata event received: %s", msg.Data)
-		},
-		"uploads.sync": func(msg *nats.Msg) {
-			log.Printf("[Sync] Checking consistency for: %s", msg.Data)
-		},
-		"user.deleted": handlers.HandleUserDeleted,
-	}
+	// Subscribe to users.deleted (durable consumer)
+	_, err = services.SubscribeEvent("users.deleted", "file_service_user_cleanup", func(msg *nats.Msg) { // Fixed: No dots
+		log.Printf("[JetStream] users.deleted message: %s", string(msg.Data))
+		// Add your cleanup logic here (e.g., delete files/DB records)
+		// ...
 
-	for subject, handler := range subs {
-		_, err := services.SubscribeNATS(subject, handler)
-		if err != nil {
-			log.Printf("Failed to subscribe to %s: %v", subject, err)
-		} else {
-			log.Printf("Subscribed to %s", subject)
+		if err := msg.Ack(); err != nil {
+			log.Printf("[JetStream] ack failed: %v", err)
 		}
+	})
+	if err != nil {
+		log.Printf("Failed to subscribe to users.deleted: %v", err)
+	} else {
+		log.Println("Subscribed to users.deleted (durable cleanup consumer)")
 	}
+
+	log.Println("NATS/JetStream setup completed")
 }

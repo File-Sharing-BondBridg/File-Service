@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 
 	"github.com/minio/minio-go/v7"
@@ -61,10 +62,19 @@ func (m *MinioService) CheckConnection() error {
 	return err
 }
 
-func (m *MinioService) UploadFile(localFilePath, objectName, contentType string) error {
-	_, err := m.client.FPutObject(context.Background(), m.bucketName, objectName, localFilePath, minio.PutObjectOptions{
-		ContentType: contentType,
-	})
+func (s *MinioService) UploadFile(reader io.Reader, size int64, objectName, contentType string) error {
+	ctx := context.Background()
+
+	_, err := s.client.PutObject(
+		ctx,
+		s.bucketName,
+		objectName,
+		reader,
+		size,
+		minio.PutObjectOptions{
+			ContentType: contentType,
+		},
+	)
 	return err
 }
 
@@ -81,7 +91,7 @@ func (m *MinioService) GetFileURL(objectName string) string {
 	return fmt.Sprintf("/files/%s", objectName)
 }
 
-// GetContentType Helper function to determine content type
+// GetContentType Helper function to determine the content type
 func GetContentType(extension string) string {
 	switch extension {
 	case ".jpg", ".jpeg":

@@ -1,12 +1,10 @@
-// internal/nats/handlers/user_deleted.go
-package handlers
+package user
 
 import (
 	"encoding/json"
 	"log"
 
 	"github.com/File-Sharing-BondBridg/File-Service/internal/services"
-	"github.com/File-Sharing-BondBridg/File-Service/internal/storage"
 	"github.com/nats-io/nats.go"
 )
 
@@ -32,7 +30,7 @@ func HandleUserDeleted(msg *nats.Msg) {
 	log.Printf("[NATS] Processing user.deleted for user_id: %s", userID)
 
 	// 1. Get all file paths from DB
-	filePaths, err := storage.GetFilePathsForUser(userID)
+	filePaths, err := services.GetFilePathsForUser(userID)
 	if err != nil {
 		log.Printf("[NATS] Failed to get file paths: %v", err)
 		nak(msg)
@@ -61,7 +59,7 @@ func HandleUserDeleted(msg *nats.Msg) {
 	}
 
 	// 3. Delete from PostgreSQL
-	deletedCount := storage.DeleteAllFilesForUser(userID)
+	deletedCount := services.DeleteAllFilesForUser(userID)
 	log.Printf("[NATS] Deleted %d file records from DB", deletedCount)
 
 	log.Printf("[NATS] Successfully cleaned up user %s", userID)

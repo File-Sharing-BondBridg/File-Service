@@ -4,14 +4,12 @@ go 1.25.2
 
 require (
 	github.com/coreos/go-oidc v2.4.0+incompatible
-	github.com/disintegration/imaging v1.6.2
+	github.com/dutchcoders/go-clamd v0.0.0-20170520113014-b970184f4d9e
 	github.com/gin-gonic/gin v1.11.0
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.10.9
 	github.com/minio/minio-go/v7 v7.0.95
 	github.com/nats-io/nats.go v1.47.0
-	github.com/streadway/amqp v1.1.0
-	golang.org/x/oauth2 v0.33.0
 )
 
 require (
@@ -50,9 +48,9 @@ require (
 	go.uber.org/mock v0.5.0 // indirect
 	golang.org/x/arch v0.20.0 // indirect
 	golang.org/x/crypto v0.40.0 // indirect
-	golang.org/x/image v0.24.0 // indirect
 	golang.org/x/mod v0.25.0 // indirect
 	golang.org/x/net v0.42.0 // indirect
+	golang.org/x/oauth2 v0.33.0 // indirect
 	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/text v0.27.0 // indirect

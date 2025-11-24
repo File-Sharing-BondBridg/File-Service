@@ -17,4 +17,6 @@ type FileMetadata struct {
 	ShareURL     string    `json:"share_url"`
 	BucketName   string    `json:"bucket_name"`
 	UserID       string    `json:"user_id,omitempty"`
+	ScanStatus   string    `json:"scan_status"`
+	ScannedAt    time.Time `json:"scanned_at"`
 }

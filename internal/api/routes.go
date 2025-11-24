@@ -2,7 +2,7 @@ package api
 
 import (
 	"github.com/File-Sharing-BondBridg/File-Service/cmd/middleware"
-	"github.com/File-Sharing-BondBridg/File-Service/internal/api/handlers"
+	"github.com/File-Sharing-BondBridg/File-Service/internal/api/handlers/file"
 	"github.com/gin-gonic/gin"
 )
 
@@ -21,6 +21,7 @@ func corsMiddleware() gin.HandlerFunc {
 
 func RegisterRoutes(r *gin.RouterGroup) {
 	// Enable CORS for preflight requests
+	r.Use(corsMiddleware())
 	r.Use(middleware.RequireAuth())
 
 	//api := r.Group("/api")
@@ -30,7 +31,8 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/health", handlers.HealthCheck)
 
 	// File endpoints
-	r.POST("/upload", handlers.UploadFile)         // upload a file
+	r.POST("/upload", handlers.UploadFile) // upload a file
+
 	r.GET("/files", handlers.ListFiles)            // list all uploaded files
 	r.GET("/files/:id", handlers.GetFile)          // Get single file
 	r.GET("/files/:id/info", handlers.GetFileInfo) // Get file metadata
