@@ -10,17 +10,17 @@ import (
 
 	"github.com/File-Sharing-BondBridg/File-Service/internal/models"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/services"
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
-func processSingleFile(c *gin.Context, fileHeader *multipart.FileHeader, userID string) (models.FileMetadata, error) {
-	// --- Generate file identifiers ---
+func processSingleFile(fileHeader *multipart.FileHeader, userID string) (models.FileMetadata, error) {
+
+	// Generate file identifiers
 	fileID := uuid.New().String()
 	ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
 	fileName := strings.TrimSuffix(fileHeader.Filename, ext)
 
-	// --- Determine file type ---
+	// Determine a file type
 	fileType := "other"
 	switch ext {
 	case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp":
@@ -33,14 +33,12 @@ func processSingleFile(c *gin.Context, fileHeader *multipart.FileHeader, userID 
 		fileType = "audio"
 	}
 
-	// --- Open the uploaded file (streaming) ---
 	file, err := fileHeader.Open()
 	if err != nil {
 		return models.FileMetadata{}, fmt.Errorf("failed to open uploaded file: %w", err)
 	}
 	defer file.Close()
 
-	// --- Upload directly to MinIO (NO TEMP FILES) ---
 	minioService := services.GetMinioService()
 	if minioService == nil {
 		return models.FileMetadata{}, fmt.Errorf("storage service not available")
@@ -49,11 +47,12 @@ func processSingleFile(c *gin.Context, fileHeader *multipart.FileHeader, userID 
 	objectName := fileID + ext
 	contentType := services.GetContentType(ext)
 
+	// Upload to MinIO
 	if err := minioService.UploadFile(file, fileHeader.Size, objectName, contentType); err != nil {
 		return models.FileMetadata{}, fmt.Errorf("failed to upload to storage: %w", err)
 	}
 
-	// --- Build metadata ---
+	// Build metadata
 	fileMetadata := models.FileMetadata{
 		ID:           fileID,
 		Name:         fileName,
@@ -67,16 +66,16 @@ func processSingleFile(c *gin.Context, fileHeader *multipart.FileHeader, userID 
 		UserID:       userID,
 	}
 
-	// --- Save metadata in Postgres ---
+	// Save metadata
 	if err := services.SaveFileMetadata(fileMetadata); err != nil {
-		// cleanup object if metadata save fails
+		// cleanup MinIO object
 		if delErr := minioService.DeleteFile(objectName); delErr != nil {
 			log.Printf("warning: failed to cleanup object after metadata save failure: %v", delErr)
 		}
 		return models.FileMetadata{}, fmt.Errorf("failed to save file metadata: %w", err)
 	}
 
-	// --- Publish event to NATS JetStream ---
+	// Publish event: "files.uploaded"
 	uploadEvent := map[string]interface{}{
 		"action":      "uploaded",
 		"file_id":     fileMetadata.ID,
@@ -91,8 +90,17 @@ func processSingleFile(c *gin.Context, fileHeader *multipart.FileHeader, userID 
 		log.Printf("warning: failed to publish files.uploaded event: %v", err)
 	}
 
-	// Optional: legacy subject
-	_ = services.PublishPlain("uploads.minio", []byte(fileMetadata.ID))
+	// Publish virus scan event
+	scanEvent := map[string]interface{}{
+		"file_id":      fileID,
+		"object_name":  objectName,
+		"user_id":      userID,
+		"requested_at": time.Now().UTC().Format(time.RFC3339),
+	}
+
+	if err := services.PublishEvent("files.scan.requested", scanEvent); err != nil {
+		log.Printf("warning: failed to publish files.scan.requested event: %v", err)
+	}
 
 	return fileMetadata, nil
 }
