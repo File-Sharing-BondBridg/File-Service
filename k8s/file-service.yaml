@@ -65,7 +65,7 @@ spec:
 
             # ---- Keycloak env ----
             - name: KEYCLOAK_URL
-              value: "http://keycloak-http/realms/bondbridg"
+              value: "http://keycloak-http/auth/realms/bondbridg"
 
             # ---- Other env ----
             - name: SERVER_PORT
