@@ -15,9 +15,17 @@ import (
 	"github.com/File-Sharing-BondBridg/File-Service/internal/services"
 	"github.com/gin-gonic/gin"
 	"github.com/nats-io/nats.go"
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 )
 
 func main() {
+	tracer.Start(
+		tracer.WithEnv("production"),
+		tracer.WithService("file-service"),
+		tracer.WithServiceVersion("1.0.0"),
+	)
+	defer tracer.Stop()
+
 	// Load configuration
 	cfg := configuration.Load()
 
