@@ -65,7 +65,7 @@ spec:
 
             # ---- Keycloak env ----
             - name: KEYCLOAK_URL
-              value: "http://keycloak-http/realms/bondbridg/.well-known/openid-configuration"
+              value: "http://keycloak-headless/realms/bondbridg"
 
             # ---- Other env ----
             - name: SERVER_PORT
