@@ -49,7 +49,7 @@ spec:
 
             # ---- Minio env ----
             - name: MINIO_ENDPOINT
-              value: "localhost:9001/browser"
+              value: "localhost:9001"
             - name: MINIO_ACCESS_KEY
               value: "minioadmin"
             - name: MINIO_SECRET_KEY
