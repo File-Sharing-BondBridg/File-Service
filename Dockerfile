@@ -17,6 +17,7 @@ ENV DD_ENV=staging \
     DD_SERVICE=file-service \
     DD_VERSION=1.0.0 \
     DD_TRACE_ENABLED=true \
+    DD_LOGS_INJECTION=true \
     DD_AGENT_HOST=datadog-agent \
     DD_TRACE_AGENT_PORT=8126
 
