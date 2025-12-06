@@ -35,7 +35,7 @@ spec:
                 fieldRef:
                   fieldPath: status.hostIP
 
-            # ---- Postgres env ----
+            # ---- Postgres environment ----
             - name: DB_HOST
               value: "postgres"
             - name: DB_PORT
