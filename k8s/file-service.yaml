@@ -34,6 +34,14 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.hostIP
+            - name: DD_TRACE_DEBUG
+              value: "true"  # Logs span events
+            - name: DD_TRACE_STARTUP_LOGS
+              value: "true"  # More init details
+            - name: DD_TRACE_PARTIAL_FLUSH_ENABLED
+              value: "true"
+            - name: DD_TRACE_PARTIAL_FLUSH_MIN_SPANS
+              value: "5"
 
             # ---- Postgres environment ----
             - name: DB_HOST
