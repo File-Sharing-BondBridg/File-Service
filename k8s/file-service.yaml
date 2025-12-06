@@ -43,7 +43,7 @@ spec:
             - name: DD_TRACE_PARTIAL_FLUSH_MIN_SPANS
               value: "5"
             - name: DD_TRACE_AGENT_URL
-              value: "http://datadog:8126"
+              value: "http://datadog-agent:8126"
 
             # ---- Postgres environment ----
             - name: DB_HOST
