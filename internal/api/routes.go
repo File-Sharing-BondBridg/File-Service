@@ -28,10 +28,10 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	//api.Use(middleware.RequireAuth())
 	//{
 	//}
-	r.GET("/health", handlers.HealthCheck)
+	r.GET("/files/health", handlers.HealthCheck)
 
 	// File endpoints
-	r.POST("/upload", handlers.UploadFile) // upload a file
+	r.POST("/files/upload", handlers.UploadFile) // upload a file
 
 	r.GET("/files", handlers.ListFiles)            // list all uploaded files
 	r.GET("/files/:id", handlers.GetFile)          // Get single file
