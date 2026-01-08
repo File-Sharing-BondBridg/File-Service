@@ -1,15 +1,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/File-Sharing-BondBridg/File-Service/cmd/middleware"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/api"
+	"github.com/File-Sharing-BondBridg/File-Service/internal/api/handlers/user"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/api/handlers/util"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/configuration"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/services"
@@ -55,15 +58,15 @@ func main() {
 	log.Printf("MinIO initialized successfully")
 
 	// Create necessary temp directories
-	if err := os.MkdirAll("./temp/uploads", 0755); err != nil {
-		log.Printf("Warning: Failed to create uploads temp directory: %v", err)
-	}
-	if err := os.MkdirAll("./temp/downloads", 0755); err != nil {
-		log.Printf("Warning: Failed to create downloads temp directory: %v", err)
-	}
-	if err := os.MkdirAll("./temp/previews", 0755); err != nil {
-		log.Printf("Warning: Failed to create previews temp directory: %v", err)
-	}
+	//if err := os.MkdirAll("./temp/uploads", 0755); err != nil {
+	//	log.Printf("Warning: Failed to create uploads temp directory: %v", err)
+	//}
+	//if err := os.MkdirAll("./temp/downloads", 0755); err != nil {
+	//	log.Printf("Warning: Failed to create downloads temp directory: %v", err)
+	//}
+	//if err := os.MkdirAll("./temp/previews", 0755); err != nil {
+	//	log.Printf("Warning: Failed to create previews temp directory: %v", err)
+	//}
 
 	setupNATS(cfg.NATSURL, cfg.CLAMAVURL)
 
@@ -136,15 +139,16 @@ func setupNATS(natsUrl, clamAvUrl string) {
 	if err != nil {
 		log.Fatal("Failed to connect to NATS/JetStream:", err)
 	}
-	_ = jsCtx // keep for possible advanced usage
+	_ = jsCtx
 
 	// Create/verify JetStream stream (idempotent; covers files.* and users.* subjects)
 	streamCfg := &nats.StreamConfig{
-		Name:      "file-events",                  // Choose a descriptive name
-		Subjects:  []string{"files.*", "users.*"}, // Matches your event subjects
-		Retention: nats.WorkQueuePolicy,           // Or nats.LimitsPolicy for interest-based
-		Storage:   nats.FileStorage,               // Persistent storage
-		Discard:   nats.DiscardNew,                // Don't discard old messages
+		Name:      "file-events",
+		Subjects:  []string{"files.*", "users.*"},
+		Retention: nats.LimitsPolicy,
+		Storage:   nats.FileStorage,
+		Discard:   nats.DiscardOld,
+		MaxAge:    24 * time.Hour,
 	}
 	if _, err := jsCtx.AddStream(streamCfg); err != nil {
 		if !strings.Contains(err.Error(), "stream name already in use") {
@@ -195,7 +199,7 @@ func setupNATS(natsUrl, clamAvUrl string) {
 	}
 
 	// Subscribe to users.deleted (durable consumer)
-	_, err = services.SubscribeEvent("users.deleted", "file_service_user_cleanup", func(msg *nats.Msg) { // Fixed: No dots
+	_, err = services.SubscribeEvent("users.deleted", "file_service_user_cleanup", func(msg *nats.Msg) {
 		log.Printf("[JetStream] users.deleted message: %s", string(msg.Data))
 		// Add your cleanup logic here (e.g., delete files/DB records)
 		// ...
@@ -208,6 +212,30 @@ func setupNATS(natsUrl, clamAvUrl string) {
 		log.Printf("Failed to subscribe to users.deleted: %v", err)
 	} else {
 		log.Println("Subscribed to users.deleted (durable cleanup consumer)")
+	}
+
+	_, err = services.SubscribeEvent(
+		"users.synced",
+		"file_service_user_init",
+		func(msg *nats.Msg) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			if err := user.HandleUserSynced(ctx, msg.Data); err != nil {
+				log.Printf("[JetStream] user sync failed: %v", err)
+				_ = msg.Nak()
+				return
+			}
+
+			if err := msg.Ack(); err != nil {
+				log.Printf("[JetStream] ack failed: %v", err)
+			}
+		},
+	)
+	if err != nil {
+		log.Printf("Failed to subscribe to users.synced: %v", err)
+	} else {
+		log.Println("Subscribed to users.synced (durable cleanup consumer)")
 	}
 
 	log.Println("NATS/JetStream setup completed")

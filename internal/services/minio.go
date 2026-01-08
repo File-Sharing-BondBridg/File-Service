@@ -11,8 +11,8 @@ import (
 )
 
 type MinioService struct {
-	client     *minio.Client
-	bucketName string
+	Client     *minio.Client
+	BucketName string
 }
 
 var minioInstance *MinioService
@@ -41,8 +41,8 @@ func InitializeMinio(endpoint, accessKey, secretKey, bucket string, useSSL bool)
 	}
 
 	minioInstance = &MinioService{
-		client:     client,
-		bucketName: bucket,
+		Client:     client,
+		BucketName: bucket,
 	}
 
 	log.Println("Connected to MinIO successfully")
@@ -55,19 +55,19 @@ func GetMinioService() *MinioService {
 
 // CheckConnection Add this method for health checks
 func (m *MinioService) CheckConnection() error {
-	if m == nil || m.client == nil {
+	if m == nil || m.Client == nil {
 		return fmt.Errorf("minio service not initialized")
 	}
-	_, err := m.client.BucketExists(context.Background(), m.bucketName)
+	_, err := m.Client.BucketExists(context.Background(), m.BucketName)
 	return err
 }
 
 func (s *MinioService) UploadFile(reader io.Reader, size int64, objectName, contentType string) error {
 	ctx := context.Background()
 
-	_, err := s.client.PutObject(
+	_, err := s.Client.PutObject(
 		ctx,
-		s.bucketName,
+		s.BucketName,
 		objectName,
 		reader,
 		size,
@@ -79,11 +79,11 @@ func (s *MinioService) UploadFile(reader io.Reader, size int64, objectName, cont
 }
 
 func (m *MinioService) DownloadFile(objectName, localFilePath string) error {
-	return m.client.FGetObject(context.Background(), m.bucketName, objectName, localFilePath, minio.GetObjectOptions{})
+	return m.Client.FGetObject(context.Background(), m.BucketName, objectName, localFilePath, minio.GetObjectOptions{})
 }
 
 func (m *MinioService) DeleteFile(objectName string) error {
-	return m.client.RemoveObject(context.Background(), m.bucketName, objectName, minio.RemoveObjectOptions{})
+	return m.Client.RemoveObject(context.Background(), m.BucketName, objectName, minio.RemoveObjectOptions{})
 }
 
 func (m *MinioService) GetFileURL(objectName string) string {
@@ -113,20 +113,20 @@ func GetContentType(extension string) string {
 
 func (s *MinioService) DeleteObjectsByPrefix(prefix string) error {
 	ctx := context.Background()
-	log.Printf("[MinIO] Starting deletion for prefix: %s (bucket: %s)", prefix, s.bucketName)
+	log.Printf("[MinIO] Starting deletion for prefix: %s (bucket: %s)", prefix, s.BucketName)
 
 	// Check bucket exists
-	exists, err := s.client.BucketExists(ctx, s.bucketName)
+	exists, err := s.Client.BucketExists(ctx, s.BucketName)
 	if err != nil {
 		log.Printf("[MinIO] Bucket check failed: %v", err)
 		return err
 	}
 	if !exists {
-		log.Printf("[MinIO] Bucket '%s' does not exist", s.bucketName)
+		log.Printf("[MinIO] Bucket '%s' does not exist", s.BucketName)
 		return nil // safe to skip
 	}
 
-	objectsCh := s.client.ListObjects(ctx, s.bucketName, minio.ListObjectsOptions{
+	objectsCh := s.Client.ListObjects(ctx, s.BucketName, minio.ListObjectsOptions{
 		Prefix:    prefix,
 		Recursive: true,
 	})
@@ -152,7 +152,7 @@ func (s *MinioService) DeleteObjectsByPrefix(prefix string) error {
 
 	log.Printf("[MinIO] Found %d objects to delete: %v", objectCount, objectKeys)
 
-	errorCh := s.client.RemoveObjects(ctx, s.bucketName, s.client.ListObjects(ctx, s.bucketName, minio.ListObjectsOptions{
+	errorCh := s.Client.RemoveObjects(ctx, s.BucketName, s.Client.ListObjects(ctx, s.BucketName, minio.ListObjectsOptions{
 		Prefix:    prefix,
 		Recursive: true,
 	}), minio.RemoveObjectsOptions{})
