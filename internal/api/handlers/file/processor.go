@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"mime/multipart"
@@ -98,9 +99,17 @@ func processSingleFile(fileHeader *multipart.FileHeader, userID string) (models.
 		"requested_at": time.Now().UTC().Format(time.RFC3339),
 	}
 
-	if err := services.PublishEvent("files.scan.requested", scanEvent); err != nil {
-		log.Printf("warning: failed to publish files.scan.requested event: %v", err)
+	if err := services.PublishPlain("files.scan.requested", mustJSON(scanEvent)); err != nil {
+		log.Printf("warning: failed to publish files.scan.requested command: %v", err)
 	}
 
 	return fileMetadata, nil
+}
+
+func mustJSON(v interface{}) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return b
 }

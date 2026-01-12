@@ -68,31 +68,21 @@ func ConnectNATS(url string) (*nats.Conn, nats.JetStreamContext, error) {
 
 // ensureStreams creates streams used by the app if they don't exist
 func ensureStreams() error {
-	// Stream config: FILE_EVENTS handles files.* and users.*
-	streamCfg := &nats.StreamConfig{
-		Name:      "FILE_EVENTS",
-		Subjects:  []string{"files.*", "users.*"},
-		Retention: nats.LimitsPolicy, // keep by limits (adjust for your retention)
-		Storage:   nats.FileStorage,
-		MaxAge:    30 * 24 * time.Hour, // keep 30 days by default
-		Replicas:  1,
+	_, err := js.StreamInfo("file-events")
+	if err == nil {
+		log.Printf("[NATS] stream %s already exists", "file-events")
+		return nil
 	}
 
-	_, err := js.AddStream(streamCfg)
-	if err != nil {
-		// If a stream already exists, AddStream returns an error — query and skips.
-		if errors.Is(err, nats.ErrStreamNameAlreadyInUse) {
-			return nil
-		}
-		// The JetStream client might also return a typed error - attempt to query
-		_, infoErr := js.StreamInfo(streamCfg.Name)
-		if infoErr == nil {
-			return nil
-		}
-		return err
+	streamCfg := &nats.StreamConfig{
+		Name:     "file-events",
+		Subjects: []string{"files.*", "users.*"},
+		Storage:  nats.FileStorage,
+		MaxAge:   30 * 24 * time.Hour,
 	}
-	log.Printf("[NATS] created stream %s", streamCfg.Name)
-	return nil
+
+	_, err = js.AddStream(streamCfg)
+	return err
 }
 
 // PublishEvent publishes an event via JetStream (durable, stored).

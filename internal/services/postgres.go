@@ -17,6 +17,9 @@ type PostgresStorage struct {
 	db *sql.DB
 }
 
+var postgresShards map[int]*PostgresStorage
+var postgresShardCount int
+
 var postgresInstance *PostgresStorage
 
 // InitializePostgres sets up PostgreSQL storage
@@ -27,6 +30,27 @@ func InitializePostgres(connectionString string) error {
 	}
 	postgresInstance = pgStorage
 	return nil
+}
+
+func InitializePostgresShards(connections []string) error {
+	postgresShards = make(map[int]*PostgresStorage)
+	postgresShardCount = len(connections)
+
+	for i, conn := range connections {
+		pg := &PostgresStorage{}
+		if err := pg.Connect(conn); err != nil {
+			return fmt.Errorf("failed to connect shard %d: %w", i, err)
+		}
+		postgresShards[i] = pg
+	}
+
+	return nil
+}
+
+func getPostgresForUser(userID string) *PostgresStorage {
+	shard := ResolveShard(userID, postgresShardCount)
+	log.Printf("[DB] user=%s → shard=%d", userID, shard)
+	return postgresShards[shard]
 }
 
 // Connect establishes connection to PostgreSQL
@@ -117,10 +141,12 @@ func (p *PostgresStorage) createTables() error {
 // Public functions - directly callable from handlers
 
 func SaveFileMetadata(metadata models.FileMetadata) error {
-	if postgresInstance == nil {
-		return fmt.Errorf("postgres storage not initialized")
-	}
-	return postgresInstance.saveFileMetadata(metadata)
+	//if postgresInstance == nil {
+	//	return fmt.Errorf("postgres storage not initialized")
+	//}
+	//return postgresInstance.saveFileMetadata(metadata)
+	pg := getPostgresForUser(metadata.UserID)
+	return pg.saveFileMetadata(metadata)
 }
 
 func GetFileMetadata(fileID string) (models.FileMetadata, bool) {
@@ -131,10 +157,12 @@ func GetFileMetadata(fileID string) (models.FileMetadata, bool) {
 }
 
 func GetUserFileMetadata(userID string) []models.FileMetadata { // Renamed public func
-	if postgresInstance == nil {
-		return []models.FileMetadata{}
-	}
-	return postgresInstance.getUserFileMetadata(userID) // Renamed private call
+	//if postgresInstance == nil {
+	//	return []models.FileMetadata{}
+	//}
+	//return postgresInstance.getUserFileMetadata(userID) // Renamed private call
+	pg := getPostgresForUser(userID)
+	return pg.getUserFileMetadata(userID)
 }
 
 // GetUserFileMetadataPage returns a paginated list of files for a user
@@ -154,17 +182,24 @@ func GetUserFileCount(userID string) (int64, error) {
 }
 
 func DeleteFileMetadata(fileID, userID string) bool {
-	if postgresInstance == nil {
-		return false
-	}
-	return postgresInstance.deleteFileMetadata(fileID, userID)
+	//if postgresInstance == nil {
+	//	return false
+	//}
+	//return postgresInstance.deleteFileMetadata(fileID, userID)
+	pg := getPostgresForUser(userID)
+	return pg.deleteFileMetadata(fileID, userID)
 }
 
 func GetStats() map[string]interface{} {
-	if postgresInstance == nil {
+	if postgresShards == nil {
 		return map[string]interface{}{}
 	}
-	return postgresInstance.getStats()
+
+	stats := map[string]interface{}{}
+	for i, shard := range postgresShards {
+		stats[fmt.Sprintf("shard_%d", i)] = shard.getStats()
+	}
+	return stats
 }
 
 // Private methods with actual implementation
@@ -451,18 +486,22 @@ func (p *PostgresStorage) deleteAllFilesForUser(userID string) int {
 	return int(count)
 }
 
-func UpdateFileScanStatus(id string, status string, now time.Time) error { // Changed return to error for consistency
-	if postgresInstance == nil {
-		return fmt.Errorf("postgres storage not initialized")
-	}
-	return postgresInstance.updateFileScanStatus(id, status, now)
+func UpdateFileScanStatus(fileID, userID, status string, now time.Time) error {
+	pg := getPostgresForUser(userID)
+	return pg.updateFileScanStatus(fileID, status, now)
 }
 
-func (p *PostgresStorage) updateFileScanStatus(fileID, status string, scannedAt time.Time) error {
-	query := `UPDATE files SET scan_status = $1, scanned_at = $2, updated_at = NOW() WHERE id = $3` // Added updated_at
+func (p *PostgresStorage) updateFileScanStatus(
+	fileID, status string,
+	scannedAt time.Time,
+) error {
+	query := `
+        UPDATE files
+        SET scan_status = $1,
+            scanned_at = $2,
+            updated_at = NOW()
+        WHERE id = $3
+    `
 	_, err := p.db.Exec(query, status, scannedAt, fileID)
-	if err != nil {
-		log.Printf("Failed to update scan status for %s: %v", fileID, err) // Log here too
-	}
 	return err
 }

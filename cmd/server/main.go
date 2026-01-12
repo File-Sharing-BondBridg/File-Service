@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -39,8 +38,20 @@ func main() {
 	}
 
 	// Initialize PostgreSQL
-	if err := services.InitializePostgres(cfg.Database.ConnectionString()); err != nil {
-		log.Fatalf("Failed to initialize PostgreSQL: %v", err)
+	shards := []string{}
+	if cfg.Database.Shard0 != "" {
+		shards = append(shards, cfg.Database.Shard0)
+	}
+	if cfg.Database.Shard1 != "" {
+		shards = append(shards, cfg.Database.Shard1)
+	}
+
+	if len(shards) < 2 {
+		log.Fatal("At least 2 database shards are required")
+	}
+
+	if err := services.InitializePostgresShards(shards); err != nil {
+		log.Fatalf("Failed to initialize PostgreSQL shards: %v", err)
 	}
 
 	log.Printf("PostgreSQL initialized successfully")
@@ -56,17 +67,6 @@ func main() {
 		log.Fatalf("Failed to initialize MinIO: %v", err)
 	}
 	log.Printf("MinIO initialized successfully")
-
-	// Create necessary temp directories
-	//if err := os.MkdirAll("./temp/uploads", 0755); err != nil {
-	//	log.Printf("Warning: Failed to create uploads temp directory: %v", err)
-	//}
-	//if err := os.MkdirAll("./temp/downloads", 0755); err != nil {
-	//	log.Printf("Warning: Failed to create downloads temp directory: %v", err)
-	//}
-	//if err := os.MkdirAll("./temp/previews", 0755); err != nil {
-	//	log.Printf("Warning: Failed to create previews temp directory: %v", err)
-	//}
 
 	setupNATS(cfg.NATSURL, cfg.CLAMAVURL)
 
@@ -135,29 +135,9 @@ func setupGracefulShutdown() {
 }
 
 func setupNATS(natsUrl, clamAvUrl string) {
-	_, jsCtx, err := services.ConnectNATS(natsUrl)
+	_, _, err := services.ConnectNATS(natsUrl)
 	if err != nil {
 		log.Fatal("Failed to connect to NATS/JetStream:", err)
-	}
-	_ = jsCtx
-
-	// Create/verify JetStream stream (idempotent; covers files.* and users.* subjects)
-	streamCfg := &nats.StreamConfig{
-		Name:      "file-events",
-		Subjects:  []string{"files.*", "users.*"},
-		Retention: nats.LimitsPolicy,
-		Storage:   nats.FileStorage,
-		Discard:   nats.DiscardOld,
-		MaxAge:    24 * time.Hour,
-	}
-	if _, err := jsCtx.AddStream(streamCfg); err != nil {
-		if !strings.Contains(err.Error(), "stream name already in use") {
-			log.Printf("Warning: Failed to create/verify stream: %v", err)
-		} else {
-			log.Println("Stream 'file-events' already exists")
-		}
-	} else {
-		log.Println("JetStream stream 'file-events' created")
 	}
 
 	// Subscribe to files.uploaded (durable consumer)
@@ -179,14 +159,21 @@ func setupNATS(natsUrl, clamAvUrl string) {
 			return
 		}
 
-		filePath, ok := event["object_name"].(string) // Fixed: snake_case
+		userID, ok := event["user_id"].(string)
+		if !ok {
+			log.Println("Missing or invalid user_id")
+			msg.Nak()
+			return
+		}
+
+		filePath, ok := event["object_name"].(string)
 		if !ok {
 			log.Println("Missing or invalid object_name")
 			msg.Nak()
 			return
 		}
 
-		util.ScanFile(fileID, filePath, clamAvUrl)
+		util.ScanFile(fileID, userID, filePath, clamAvUrl)
 
 		if err := msg.Ack(); err != nil {
 			log.Printf("[JetStream] ack failed: %v", err)

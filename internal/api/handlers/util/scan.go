@@ -10,7 +10,7 @@ import (
 	clamd "github.com/dutchcoders/go-clamd"
 )
 
-func ScanFile(fileID, objectName, clamAvUrl string) {
+func ScanFile(fileID, userID, objectName, clamAvUrl string) {
 	minioService := services.GetMinioService()
 	tempPath := fmt.Sprintf("/tmp/%s", objectName)
 
@@ -45,7 +45,7 @@ func ScanFile(fileID, objectName, clamAvUrl string) {
 	}
 
 	// Update metadata
-	if err := services.UpdateFileScanStatus(fileID, status, time.Now()); err != nil {
+	if err := services.UpdateFileScanStatus(fileID, userID, status, time.Now()); err != nil {
 		log.Println("Failed to update scan status:", err)
 	} else {
 		log.Printf("Scan finished for %s: %s", fileID, status)

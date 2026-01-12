@@ -21,6 +21,8 @@ type DatabaseConfig struct {
 	Password string
 	DBName   string
 	SSLMode  string
+	Shard0   string
+	Shard1   string
 }
 
 type MinIOConfig struct {
@@ -44,6 +46,8 @@ func Load() *Config {
 			Password: getEnv("DB_PASSWORD", "filepassword"),
 			DBName:   getEnv("DB_NAME", "filemanager"),
 			SSLMode:  getEnv("DB_SSL_MODE", "disable"),
+			Shard0:   getEnv("PG_SHARD_0", "postgres://fileuser:filepassword@localhost:5432/files_shard_0?sslmode=disable"),
+			Shard1:   getEnv("PG_SHARD_1", "postgres://fileuser:filepassword@localhost:5432/files_shard_1?sslmode=disable"),
 		},
 		MinIO: MinIOConfig{
 			Endpoint:   getEnv("MINIO_ENDPOINT", "localhost:9000"),

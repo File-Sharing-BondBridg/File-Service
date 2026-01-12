@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/File-Sharing-BondBridg/File-Service/internal/models"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/services"
 	"github.com/gin-gonic/gin"
 )
@@ -95,6 +96,11 @@ func ListFiles(c *gin.Context) {
 		"total":      total,
 		"totalPages": totalPages,
 	})
+}
+
+func GetFileMetadataForUser(fileID, userID string) (models.FileMetadata, bool) {
+	pg := getPostgresForUser(userID)
+	return pg.getFileMetadata(fileID)
 }
 
 func GetPreview(c *gin.Context) {
