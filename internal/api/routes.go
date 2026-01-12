@@ -24,10 +24,6 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	r.Use(corsMiddleware())
 	r.Use(middleware.RequireAuth())
 
-	//api := r.Group("/api")
-	//api.Use(middleware.RequireAuth())
-	//{
-	//}
 	r.GET("/files/health", handlers.HealthCheck)
 
 	// File endpoints
@@ -38,8 +34,6 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/files/:id/info", handlers.GetFileInfo) // Get file metadata
 
 	// Download a specific file
-	r.GET("/preview/:id", handlers.GetPreview)          // fetch preview of a file
 	r.GET("/files/:id/download", handlers.DownloadFile) // Download file
-	r.GET("/files/:id/preview", handlers.GetPreview)    // Get preview
 	r.DELETE("/files/:id/delete", handlers.DeleteFile)  // Delete file
 }

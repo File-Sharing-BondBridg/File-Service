@@ -53,6 +53,11 @@ func getPostgresForUser(userID string) *PostgresStorage {
 	return postgresShards[shard]
 }
 
+func GetFileMetadataForUser(fileID, userID string) (models.FileMetadata, bool) {
+	pg := getPostgresForUser(userID)
+	return pg.getFileMetadata(fileID)
+}
+
 // Connect establishes connection to PostgreSQL
 func (p *PostgresStorage) Connect(connectionString string) error {
 	db, err := sql.Open("postgres", connectionString)
@@ -167,25 +172,17 @@ func GetUserFileMetadata(userID string) []models.FileMetadata { // Renamed publi
 
 // GetUserFileMetadataPage returns a paginated list of files for a user
 func GetUserFileMetadataPage(userID string, limit, offset int) ([]models.FileMetadata, error) {
-	if postgresInstance == nil {
-		return []models.FileMetadata{}, fmt.Errorf("postgres storage not initialized")
-	}
-	return postgresInstance.getUserFileMetadataPage(userID, limit, offset)
+	pg := getPostgresForUser(userID)
+	return pg.getUserFileMetadataPage(userID, limit, offset)
 }
 
 // GetUserFileCount returns total number of files for a user
 func GetUserFileCount(userID string) (int64, error) {
-	if postgresInstance == nil {
-		return 0, fmt.Errorf("postgres storage not initialized")
-	}
-	return postgresInstance.getUserFileCount(userID)
+	pg := getPostgresForUser(userID)
+	return pg.getUserFileCount(userID)
 }
 
 func DeleteFileMetadata(fileID, userID string) bool {
-	//if postgresInstance == nil {
-	//	return false
-	//}
-	//return postgresInstance.deleteFileMetadata(fileID, userID)
 	pg := getPostgresForUser(userID)
 	return pg.deleteFileMetadata(fileID, userID)
 }

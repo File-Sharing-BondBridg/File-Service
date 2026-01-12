@@ -18,14 +18,15 @@ func DeleteFile(c *gin.Context) {
 	}
 
 	// Get file metadata first
-	metadata, exists := services.GetFileMetadata(fileID)
+	userID, exists := userIDFromContext(c)
 	if !exists {
-		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
 		return
 	}
-	userID, _ := userIDFromContext(c)
-	if metadata.UserID != userID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+
+	metadata, exists := services.GetFileMetadataForUser(fileID, userID)
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 		return
 	}
 
