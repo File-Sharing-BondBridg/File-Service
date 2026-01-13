@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/File-Sharing-BondBridg/File-Service/internal/services"
+	"github.com/File-Sharing-BondBridg/File-Service/internal/services/query"
 	"github.com/gin-gonic/gin"
 )
 
@@ -19,7 +20,7 @@ func GetFile(c *gin.Context) {
 		return
 	}
 
-	metadata, exists := services.GetFileMetadataForUser(id, userID)
+	metadata, exists := query.GetFileMetadataForUser(id, userID)
 	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 		return
@@ -67,12 +68,12 @@ func ListFiles(c *gin.Context) {
 	}
 	offset := (page - 1) * pageSize
 
-	files, err := services.GetUserFileMetadataPage(userID, pageSize, offset)
+	files, err := query.GetUserFileMetadataPage(userID, pageSize, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch files"})
 		return
 	}
-	total, err := services.GetUserFileCount(userID)
+	total, err := query.GetUserFileCount(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch total count"})
 		return
@@ -101,7 +102,7 @@ func GetFileInfo(c *gin.Context) {
 		return
 	}
 
-	metadata, exists := services.GetFileMetadataForUser(id, userID)
+	metadata, exists := query.GetFileMetadataForUser(id, userID)
 	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 		return

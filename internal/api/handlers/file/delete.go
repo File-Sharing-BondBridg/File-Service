@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"github.com/File-Sharing-BondBridg/File-Service/internal/services"
+	"github.com/File-Sharing-BondBridg/File-Service/internal/services/command"
+	"github.com/File-Sharing-BondBridg/File-Service/internal/services/query"
 	"github.com/gin-gonic/gin"
 )
 
@@ -24,7 +26,7 @@ func DeleteFile(c *gin.Context) {
 		return
 	}
 
-	metadata, exists := services.GetFileMetadataForUser(fileID, userID)
+	metadata, exists := query.GetFileMetadataForUser(fileID, userID)
 	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 		return
@@ -51,7 +53,7 @@ func DeleteFile(c *gin.Context) {
 	}
 
 	// Delete metadata from PostgreSQL
-	if services.DeleteFileMetadata(fileID, userID) {
+	if command.DeleteFileMetadata(fileID, userID) {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "File deleted successfully",
 			"file_id": fileID,

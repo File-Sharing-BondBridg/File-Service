@@ -1,4 +1,4 @@
-package services
+package infrastructure
 
 import (
 	"hash/fnv"
@@ -6,10 +6,6 @@ import (
 
 type Resolver struct {
 	shardCount int
-}
-
-func NewResolver(shardCount int) *Resolver {
-	return &Resolver{shardCount: shardCount}
 }
 
 func ResolveShard(userID string, shardCount int) int {

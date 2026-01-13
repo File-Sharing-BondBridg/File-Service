@@ -5,6 +5,8 @@ import (
 	"log"
 
 	"github.com/File-Sharing-BondBridg/File-Service/internal/services"
+	"github.com/File-Sharing-BondBridg/File-Service/internal/services/command"
+	"github.com/File-Sharing-BondBridg/File-Service/internal/services/query"
 	"github.com/nats-io/nats.go"
 )
 
@@ -15,22 +17,22 @@ type UserDeletedPayload struct {
 func HandleUserDeleted(msg *nats.Msg) {
 	var payload UserDeletedPayload
 	if err := json.Unmarshal(msg.Data, &payload); err != nil {
-		log.Printf("[NATS] user.deleted: invalid JSON: %v", err)
+		log.Printf("[NATS] users.deleted: invalid JSON: %v", err)
 		nak(msg)
 		return
 	}
 
 	userID := payload.UserID
 	if userID == "" {
-		log.Printf("[NATS] user.deleted: missing user_id")
+		log.Printf("[NATS] users.deleted: missing user_id")
 		nak(msg)
 		return
 	}
 
-	log.Printf("[NATS] Processing user.deleted for user_id: %s", userID)
+	log.Printf("[NATS] Processing users.deleted for user_id: %s", userID)
 
 	// 1. Get all file paths from DB
-	filePaths, err := services.GetFilePathsForUser(userID)
+	filePaths, err := query.GetFilePathsForUser(userID)
 	if err != nil {
 		log.Printf("[NATS] Failed to get file paths: %v", err)
 		nak(msg)
@@ -59,7 +61,7 @@ func HandleUserDeleted(msg *nats.Msg) {
 	}
 
 	// 3. Delete from PostgreSQL
-	deletedCount := services.DeleteAllFilesForUser(userID)
+	deletedCount := command.DeleteAllFilesForUser(userID)
 	log.Printf("[NATS] Deleted %d file records from DB", deletedCount)
 
 	log.Printf("[NATS] Successfully cleaned up user %s", userID)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/File-Sharing-BondBridg/File-Service/internal/services"
+	"github.com/File-Sharing-BondBridg/File-Service/internal/services/command"
 	clamd "github.com/dutchcoders/go-clamd"
 )
 
@@ -45,7 +46,7 @@ func ScanFile(fileID, userID, objectName, clamAvUrl string) {
 	}
 
 	// Update metadata
-	if err := services.UpdateFileScanStatus(fileID, userID, status, time.Now()); err != nil {
+	if err := command.UpdateFileScanStatus(fileID, userID, status, time.Now()); err != nil {
 		log.Println("Failed to update scan status:", err)
 	} else {
 		log.Printf("Scan finished for %s: %s", fileID, status)

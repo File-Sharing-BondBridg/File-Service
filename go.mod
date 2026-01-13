@@ -7,7 +7,7 @@ require (
 	github.com/dutchcoders/go-clamd v0.0.0-20170520113014-b970184f4d9e
 	github.com/gin-gonic/gin v1.11.0
 	github.com/google/uuid v1.6.0
-	github.com/lib/pq v1.10.9
+	github.com/lib/pq v1.10.2
 	github.com/minio/minio-go/v7 v7.0.95
 	github.com/nats-io/nats.go v1.47.0
 	gopkg.in/DataDog/dd-trace-go.v1 v1.74.8

@@ -11,6 +11,7 @@ import (
 
 	"github.com/File-Sharing-BondBridg/File-Service/internal/models"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/services"
+	"github.com/File-Sharing-BondBridg/File-Service/internal/services/command"
 	"github.com/google/uuid"
 )
 
@@ -68,7 +69,7 @@ func processSingleFile(fileHeader *multipart.FileHeader, userID string) (models.
 	}
 
 	// Save metadata
-	if err := services.SaveFileMetadata(fileMetadata); err != nil {
+	if err := command.SaveFileMetadata(fileMetadata); err != nil {
 		// cleanup MinIO object
 		if delErr := minioService.DeleteFile(objectName); delErr != nil {
 			log.Printf("warning: failed to cleanup object after metadata save failure: %v", delErr)

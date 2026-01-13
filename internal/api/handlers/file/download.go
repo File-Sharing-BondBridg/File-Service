@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/File-Sharing-BondBridg/File-Service/internal/services"
+	"github.com/File-Sharing-BondBridg/File-Service/internal/services/query"
 	"github.com/gin-gonic/gin"
 )
 
@@ -13,7 +14,7 @@ func DownloadFile(c *gin.Context) {
 	id := c.Param("id")
 
 	// Get file metadata
-	metadata, exists := services.GetFileMetadata(id)
+	metadata, exists := query.GetFileMetadata(id)
 	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 		return

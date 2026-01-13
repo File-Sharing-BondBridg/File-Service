@@ -15,6 +15,7 @@ import (
 	"github.com/File-Sharing-BondBridg/File-Service/internal/api/handlers/util"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/configuration"
 	"github.com/File-Sharing-BondBridg/File-Service/internal/services"
+	"github.com/File-Sharing-BondBridg/File-Service/internal/services/infrastructure"
 	"github.com/gin-gonic/gin"
 	"github.com/nats-io/nats.go"
 	gintrace "gopkg.in/DataDog/dd-trace-go.v1/contrib/gin-gonic/gin"
@@ -50,7 +51,7 @@ func main() {
 		log.Fatal("At least 2 database shards are required")
 	}
 
-	if err := services.InitializePostgresShards(shards); err != nil {
+	if err := infrastructure.InitializePostgresShards(shards); err != nil {
 		log.Fatalf("Failed to initialize PostgreSQL shards: %v", err)
 	}
 
@@ -89,7 +90,7 @@ func main() {
 	})
 
 	r.GET("/health", func(c *gin.Context) {
-		stats := services.GetStats()
+		stats := infrastructure.GetStats()
 		minioService := services.GetMinioService()
 		var minioStatus string
 
@@ -186,15 +187,11 @@ func setupNATS(natsUrl, clamAvUrl string) {
 	}
 
 	// Subscribe to users.deleted (durable consumer)
-	_, err = services.SubscribeEvent("users.deleted", "file_service_user_cleanup", func(msg *nats.Msg) {
-		log.Printf("[JetStream] users.deleted message: %s", string(msg.Data))
-		// Add your cleanup logic here (e.g., delete files/DB records)
-		// ...
-
-		if err := msg.Ack(); err != nil {
-			log.Printf("[JetStream] ack failed: %v", err)
-		}
-	})
+	_, err = services.SubscribeEvent(
+		"users.deleted",
+		"file_service_user_cleanup",
+		user.HandleUserDeleted,
+	)
 	if err != nil {
 		log.Printf("Failed to subscribe to users.deleted: %v", err)
 	} else {

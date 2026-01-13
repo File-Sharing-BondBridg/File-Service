@@ -1,7 +1,6 @@
 package services
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -14,7 +13,7 @@ import (
 var (
 	nc  *nats.Conn
 	js  nats.JetStreamContext
-	njm nats.JetStreamContext // alias for clarity if needed
+	njm nats.JetStreamContext
 )
 
 // ConnectNATS connects to NATS and initializes JetStream and streams.
@@ -134,25 +133,4 @@ func PublishPlain(subject string, payload []byte) error {
 		return nats.ErrConnectionClosed
 	}
 	return nc.Publish(subject, payload)
-}
-
-// CloseNATS cleanly drains and closes the connection
-func CloseNATS(ctx context.Context) error {
-	if nc == nil {
-		return nil
-	}
-	done := make(chan struct{})
-	go func() {
-		nc.Drain()
-		nc.Close()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		log.Println("[NATS] drained and closed")
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
