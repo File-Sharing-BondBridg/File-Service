@@ -36,4 +36,6 @@ func RegisterRoutes(r *gin.RouterGroup) {
 	// Download a specific file
 	r.GET("/files/:id/download", handlers.DownloadFile) // Download file
 	r.DELETE("/files/:id/delete", handlers.DeleteFile)  // Delete file
+
+	r.GET("/files/stats", handlers.GetMyFileStats)
 }

@@ -7,8 +7,6 @@ import (
 	"github.com/File-Sharing-BondBridg/File-Service/internal/services/infrastructure"
 )
 
-var postgresInstance *infrastructure.PostgresStorage
-
 func SaveFileMetadata(metadata models.FileMetadata) error {
 	// Default implementation
 	//if postgresInstance == nil {
@@ -18,11 +16,13 @@ func SaveFileMetadata(metadata models.FileMetadata) error {
 
 	// Sharding implementation
 	pg := infrastructure.GetPostgresForUser(metadata.UserID)
+	_ = pg.IncrementUserFileStats(metadata.UserID)
 	return pg.SaveFileMetadata(metadata)
 }
 
 func DeleteFileMetadata(fileID, userID string) bool {
 	pg := infrastructure.GetPostgresForUser(userID)
+	_ = pg.DecrementUserFileStats(userID)
 	return pg.DeleteFileMetadata(fileID, userID)
 }
 
@@ -33,5 +33,6 @@ func UpdateFileScanStatus(fileID, userID, status string, now time.Time) error {
 
 func DeleteAllFilesForUser(userID string) int {
 	pg := infrastructure.GetPostgresForUser(userID)
+	_ = pg.DeleteUserFileStats(userID)
 	return pg.DeleteAllFilesForUser(userID)
 }

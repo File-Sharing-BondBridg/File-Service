@@ -9,27 +9,35 @@ import (
 
 var postgresInstance *infrastructure.PostgresStorage
 
-func GetUserFileMetadata(userID string) []models.FileMetadata { // Renamed public func
-	//if postgresInstance == nil {
-	//	return []models.FileMetadata{}
-	//}
-	//return postgresInstance.getUserFileMetadata(userID) // Renamed private call
-	pg := infrastructure.GetPostgresForUser(userID)
-	return pg.GetUserFileMetadata(userID)
-}
-
 // GetUserFileMetadataPage returns a paginated list of files for a user
 func GetUserFileMetadataPage(userID string, limit, offset int) ([]models.FileMetadata, error) {
 	pg := infrastructure.GetPostgresForUser(userID)
 	return pg.GetUserFileMetadataPage(userID, limit, offset)
 }
 
-// GetUserFileCount returns total number of files for a user
+// GetUserFileCount returns the total number of files for a user
 func GetUserFileCount(userID string) (int64, error) {
 	pg := infrastructure.GetPostgresForUser(userID)
 	return pg.GetUserFileCount(userID)
 }
 
+func GetUserFileStats(userID string) (models.UserFileStats, error) {
+	pg := infrastructure.GetPostgresForUser(userID)
+	if pg == nil {
+		return models.UserFileStats{}, nil
+	}
+
+	count, err := pg.GetUserFileStats(userID)
+	if err != nil {
+		return models.UserFileStats{}, err
+	}
+
+	return models.UserFileStats{
+		FileCount: count,
+	}, nil
+}
+
+// GetFileMetadataForUser retrieves metadata of a file associated with a specific user based on the provided fileID and userID.
 func GetFileMetadataForUser(fileID, userID string) (models.FileMetadata, bool) {
 	pg := infrastructure.GetPostgresForUser(userID)
 	return pg.GetFileMetadata(fileID)

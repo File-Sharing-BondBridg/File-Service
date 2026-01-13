@@ -11,42 +11,46 @@ import (
 
 func (p *PostgresStorage) createTables() error {
 	query := `
-  CREATE TABLE IF NOT EXISTS files (
-      id UUID PRIMARY KEY,
-      name VARCHAR(255) NOT NULL,
-      original_name VARCHAR(255) NOT NULL,
-      size BIGINT NOT NULL,
-      type VARCHAR(50) NOT NULL,
-      extension VARCHAR(10) NOT NULL,
-      uploaded_at TIMESTAMPTZ NOT NULL,
-      file_path VARCHAR(500),
-      preview_path VARCHAR(500),
-      share_url VARCHAR(500),
-      bucket_name VARCHAR(100) DEFAULT 'files',
-      is_processed BOOLEAN DEFAULT false,
-      scan_status VARCHAR(50) DEFAULT 'pending',
-      scanned_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW(),
-      user_id UUID NOT NULL
-  );
+	CREATE TABLE IF NOT EXISTS files (
+	  id UUID PRIMARY KEY,
+	  name VARCHAR(255) NOT NULL,
+	  original_name VARCHAR(255) NOT NULL,
+	  size BIGINT NOT NULL,
+	  type VARCHAR(50) NOT NULL,
+	  extension VARCHAR(10) NOT NULL,
+	  uploaded_at TIMESTAMPTZ NOT NULL,
+	  file_path VARCHAR(500),
+	  preview_path VARCHAR(500),
+	  share_url VARCHAR(500),
+	  bucket_name VARCHAR(100) DEFAULT 'files',
+	  is_processed BOOLEAN DEFAULT false,
+	  scan_status VARCHAR(50) DEFAULT 'pending',
+	  scanned_at TIMESTAMPTZ,
+	  created_at TIMESTAMPTZ DEFAULT NOW(),
+	  updated_at TIMESTAMPTZ DEFAULT NOW(),
+	  user_id UUID NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS user_file_stats (
+		user_id UUID PRIMARY KEY,
+		file_count INT NOT NULL DEFAULT 0,
+		updated_at TIMESTAMP NOT NULL DEFAULT now()
+	);
+
   `
 	_, err := p.Db.Exec(query)
 	if err != nil {
 		return err
 	}
 
-	// Idempotent: Add columns if missing (safe on restarts)
+	// Add columns if missing
 	alterQueries := []string{
 		`ALTER TABLE files ADD COLUMN IF NOT EXISTS scan_status VARCHAR(50) DEFAULT 'pending'`,
 		`ALTER TABLE files ADD COLUMN IF NOT EXISTS scanned_at TIMESTAMPTZ`,
-		// Optional: Update existing rows to 'pending' if needed
-		// `UPDATE files SET scan_status = 'pending' WHERE scan_status IS NULL`,
 	}
 	for _, altQuery := range alterQueries {
 		_, err := p.Db.Exec(altQuery)
 		if err != nil {
-			// Log but don't fail—some DBs may error if column exists
 			log.Printf("Warning during ALTER: %v", err)
 		}
 	}
@@ -63,7 +67,54 @@ func (p *PostgresStorage) createTables() error {
 	return err
 }
 
+func (p *PostgresStorage) IncrementUserFileStats(userID string) error {
+	_, err := p.Db.Exec(`
+        INSERT INTO user_file_stats (user_id, file_count)
+        VALUES ($1, 1)
+        ON CONFLICT (user_id)
+        DO UPDATE SET
+            file_count = user_file_stats.file_count + 1,
+            updated_at = NOW()
+    `, userID)
+
+	return err
+}
+
+func (p *PostgresStorage) DecrementUserFileStats(userID string) error {
+	_, err := p.Db.Exec(`
+        UPDATE user_file_stats
+        SET
+            file_count = GREATEST(file_count - 1, 0),
+            updated_at = NOW()
+        WHERE user_id = $1
+    `, userID)
+	return err
+}
+
+func (p *PostgresStorage) DeleteUserFileStats(userID string) error {
+	_, err := p.Db.Exec(`
+        DELETE FROM user_file_stats WHERE user_id = $1
+    `, userID)
+	return err
+}
+
+func (p *PostgresStorage) GetUserFileStats(userID string) (int, error) {
+	var count int
+
+	err := p.Db.QueryRow(`
+        SELECT file_count
+        FROM user_file_stats
+        WHERE user_id = $1
+    `, userID).Scan(&count)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return count, err
+}
+
 // Private methods with actual implementation
+
 func (p *PostgresStorage) SaveFileMetadata(metadata models.FileMetadata) error {
 	query := `
   INSERT INTO files (id, name, original_name, size, type, extension, uploaded_at, file_path, preview_path, share_url, bucket_name, user_id, scan_status)
@@ -307,7 +358,6 @@ func (p *PostgresStorage) getStats() map[string]interface{} {
 
 	return map[string]interface{}{
 		"total_files":   totalFiles,
-		"total_size_mb": float64(totalSize) / (1024 * 1024),
 		"latest_upload": latestUpload,
 	}
 }
