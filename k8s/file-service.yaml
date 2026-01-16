@@ -16,7 +16,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: file-service
-          image: nazim112/file-service:latest
+          image: nazim112/file-service@sha256:916c2dd423399b417f3cb11b609e02946b6df04aaf6419b2e1ca9df8a8bcff8d
           ports:
             - containerPort: 8080
 
